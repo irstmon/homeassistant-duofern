@@ -40,12 +40,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import (
-    DEGREE,
-    UnitOfIlluminance,
-    UnitOfSpeed,
-    UnitOfTemperature,
-)
+from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -73,7 +68,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         name="Helligkeit",
         device_class=SensorDeviceClass.ILLUMINANCE,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfIlluminance.LUX,
+        native_unit_of_measurement="lx",
     ),
     DuoFernSensorDescription(
         key="temperature",
@@ -89,14 +84,14 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         name="Wind",
         device_class=SensorDeviceClass.WIND_SPEED,
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfSpeed.METERS_PER_SECOND,
+        native_unit_of_measurement="m/s",
     ),
     DuoFernSensorDescription(
         key="sunDirection",
         reading_key="sunDirection",
         name="Sonnenrichtung",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=DEGREE,
+        native_unit_of_measurement="°",
         icon="mdi:sun-compass",
     ),
     DuoFernSensorDescription(
@@ -104,7 +99,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         reading_key="sunHeight",
         name="Sonnenhöhe",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=DEGREE,
+        native_unit_of_measurement="°",
         icon="mdi:weather-sunny",
     ),
 )
