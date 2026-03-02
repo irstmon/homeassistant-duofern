@@ -206,7 +206,7 @@ class DuoFernStatusButton(
 
     async def async_press(self) -> None:
         """Send broadcast status request to all paired devices."""
-        await self.coordinator.async_request_status()
+        await self.coordinator.async_request_all_status()
 
 
 # ---------------------------------------------------------------------------

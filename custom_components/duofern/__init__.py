@@ -69,7 +69,9 @@ PLATFORMS: list[Platform] = [
 type DuoFernConfigEntry = ConfigEntry[DuoFernCoordinator]
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+async def async_migrate_entry(
+    hass: HomeAssistant, config_entry: ConfigEntry
+) -> bool:
     """Migrate old config entries to new format.
 
     Version 1 -> 2: Add paired_devices key to entry.data (empty list default).
@@ -80,13 +82,17 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
     if config_entry.version == 1:
         new_data = {**config_entry.data, CONF_PAIRED_DEVICES: []}
-        hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, version=2
+        )
         _LOGGER.info("Migrated DuoFern config entry to version 2")
 
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> bool:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: DuoFernConfigEntry
+) -> bool:
     """Set up DuoFern from a config entry.
 
     Called by HA when the user completes the config flow or on HA startup
@@ -117,7 +123,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     )
 
     try:
-        await coordinator.connect()
+        await coordinator.async_connect()
     except Exception as err:
         _LOGGER.error("Failed to connect to DuoFern stick: %s", err)
         raise
@@ -146,17 +152,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: DuoFernConfigEntry
+) -> bool:
     """Unload a DuoFern config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
     if unload_ok:
         coordinator: DuoFernCoordinator = entry.runtime_data
-        await coordinator.disconnect()
+        await coordinator.async_disconnect()
 
     return unload_ok
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def _async_update_listener(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
     """Handle config entry updates (reload integration)."""
     await hass.config_entries.async_reload(entry.entry_id)
