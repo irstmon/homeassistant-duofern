@@ -97,9 +97,10 @@ async def async_setup_entry(
             entities.append(DuoFernResetSettingsButton(coordinator, dev_code))
             entities.append(DuoFernResetFullButton(coordinator, dev_code))
 
-        # remotePair/remoteUnpair for all devices
-        entities.append(DuoFernRemotePairButton(coordinator, dev_code))
-        entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
+        # remotePair/remoteUnpair — not for remotes themselves (no set commands)
+        if not dev_code.is_remote:
+            entities.append(DuoFernRemotePairButton(coordinator, dev_code))
+            entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
 
         # tempUp/tempDown for thermostat
         if dev_code.is_climate:
@@ -114,9 +115,10 @@ async def async_setup_entry(
             else device_state.device_code
         )
         dev_type = dev_code.device_type
-        # getStatus for all devices that support it (from %commandsStatus)
-        # Covers, switches, dimmers, thermostat, SX5, Umweltsensor
-        entities.append(DuoFernGetStatusButton(coordinator, dev_code))
+        # getStatus for all actuators (from %commandsStatus)
+        # Remotes have no get commands in FHEM
+        if not dev_code.is_remote:
+            entities.append(DuoFernGetStatusButton(coordinator, dev_code))
 
         # Umweltsensor 00 channel: getWeather, getTime, getConfig, writeConfig, setTime
         if (

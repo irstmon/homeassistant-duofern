@@ -64,6 +64,7 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.NUMBER,
     Platform.SELECT,
+    Platform.EVENT,
 ]
 
 # Type alias for runtime data stored on the config entry

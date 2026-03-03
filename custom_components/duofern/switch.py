@@ -385,12 +385,15 @@ async def async_setup_entry(
             )
             _LOGGER.debug("Adding switch entity for device %s", hex_code)
 
-        # 2. Automation toggle switches (CONFIG) for all actuators
-        for desc in AUTOMATION_SWITCH_DESCRIPTIONS:
-            if dev_type in desc.device_types:
-                entities.append(
-                    DuoFernAutomationSwitch(coordinator, device_state, hex_code, desc)
-                )
+        # 2. Automation toggle switches (CONFIG) for actuators only (not remotes)
+        if not device_state.device_code.is_remote:
+            for desc in AUTOMATION_SWITCH_DESCRIPTIONS:
+                if dev_type in desc.device_types:
+                    entities.append(
+                        DuoFernAutomationSwitch(
+                            coordinator, device_state, hex_code, desc
+                        )
+                    )
 
     if entities:
         async_add_entities(entities)
