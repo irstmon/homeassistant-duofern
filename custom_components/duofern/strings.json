@@ -117,5 +117,25 @@
         "name": "Light Curtain"
       }
     }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "up": "Button Up pressed",
+      "stop": "Button Stop pressed",
+      "down": "Button Down pressed",
+      "stepUp": "Button Step Up pressed",
+      "stepDown": "Button Step Down pressed",
+      "pressed": "Button pressed",
+      "on": "Button On pressed",
+      "off": "Button Off pressed"
+    },
+    "trigger_subtype": {
+      "channel_01": "Channel 1",
+      "channel_02": "Channel 2",
+      "channel_03": "Channel 3",
+      "channel_04": "Channel 4",
+      "channel_05": "Channel 5",
+      "channel_06": "Channel 6"
+    }
   }
 }

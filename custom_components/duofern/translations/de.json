@@ -307,5 +307,25 @@
         "name": "Sonnenhöhe"
       }
     }
+  },
+  "device_automation": {
+    "trigger_type": {
+      "up": "Taste Hoch gedrückt",
+      "stop": "Taste Stop gedrückt",
+      "down": "Taste Runter gedrückt",
+      "stepUp": "Taste Schritt hoch gedrückt",
+      "stepDown": "Taste Schritt runter gedrückt",
+      "pressed": "Taste gedrückt",
+      "on": "Taste Ein gedrückt",
+      "off": "Taste Aus gedrückt"
+    },
+    "trigger_subtype": {
+      "channel_01": "Kanal 1",
+      "channel_02": "Kanal 2",
+      "channel_03": "Kanal 3",
+      "channel_04": "Kanal 4",
+      "channel_05": "Kanal 5",
+      "channel_06": "Kanal 6"
+    }
   }
 }

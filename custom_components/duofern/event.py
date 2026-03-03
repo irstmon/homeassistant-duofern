@@ -22,7 +22,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, REMOTE_DEVICE_TYPES
-from .coordinator import DUOFERN_EVENT, DuoFernConfigEntry, DuoFernCoordinator
+from . import DuoFernConfigEntry
+from .coordinator import DUOFERN_EVENT, DuoFernCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
