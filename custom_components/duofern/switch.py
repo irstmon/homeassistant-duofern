@@ -430,7 +430,7 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
         self._attr_unique_id = f"{DOMAIN}_{hex_code}"
         self._channel_int = int(self._channel, 16) if self._channel else 1
 
-        if self._device_code.device_type == 0x46:
+        if self._device_code.device_type in (0x43, 0x46):
             self._attr_device_class = SwitchDeviceClass.OUTLET
         else:
             self._attr_device_class = SwitchDeviceClass.SWITCH

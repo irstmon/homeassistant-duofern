@@ -66,15 +66,24 @@ async def async_setup_entry(
 
     # Add dusk/dawn/toggle buttons for every cover device
     for hex_code, device_state in coordinator.data.devices.items():
-        if device_state.device_code.is_cover:
-            entities.append(DuoFernDuskButton(coordinator, device_state.device_code))
-            entities.append(DuoFernDawnButton(coordinator, device_state.device_code))
-            entities.append(DuoFernToggleButton(coordinator, device_state.device_code))
+        dc = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.channel
+            else device_state.device_code
+        )
+        if dc.is_cover:
+            entities.append(DuoFernDuskButton(coordinator, dc))
+            entities.append(DuoFernDawnButton(coordinator, dc))
+            entities.append(DuoFernToggleButton(coordinator, dc))
 
     # Reset buttons for all actuators (covers, switches, dimmers)
     # remotePair/remoteUnpair for all
     for hex_code, device_state in coordinator.data.devices.items():
-        dev_code = device_state.device_code
+        dev_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.channel
+            else device_state.device_code
+        )
         dev_type = dev_code.device_type
 
         # reset:settings,full for all devices that support it
@@ -99,7 +108,11 @@ async def async_setup_entry(
 
     # Per-device getStatus buttons for all actuators
     for hex_code, device_state in coordinator.data.devices.items():
-        dev_code = device_state.device_code
+        dev_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.channel
+            else device_state.device_code
+        )
         dev_type = dev_code.device_type
         # getStatus for all devices that support it (from %commandsStatus)
         # Covers, switches, dimmers, thermostat, SX5, Umweltsensor
@@ -230,7 +243,7 @@ class DuoFernDuskButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_dusk"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hex_code)},
@@ -264,7 +277,7 @@ class DuoFernDawnButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_dawn"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, hex_code)},
@@ -299,7 +312,7 @@ class DuoFernToggleButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_toggle"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -331,7 +344,7 @@ class DuoFernResetSettingsButton(CoordinatorEntity[DuoFernCoordinator], ButtonEn
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_reset_settings"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -358,7 +371,7 @@ class DuoFernResetFullButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_reset_full"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -390,7 +403,7 @@ class DuoFernRemotePairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_pair"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -417,7 +430,7 @@ class DuoFernRemoteUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_unpair"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -448,7 +461,7 @@ class DuoFernTempUpButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_temp_up"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -474,7 +487,7 @@ class DuoFernTempDownButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity)
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_temp_down"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -503,7 +516,7 @@ class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_status"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -531,7 +544,7 @@ class DuoFernGetWeatherButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_weather"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -554,7 +567,7 @@ class DuoFernGetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_time"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -578,7 +591,7 @@ class DuoFernGetConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_config"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -601,7 +614,7 @@ class DuoFernSetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_set_time"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
@@ -629,7 +642,7 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
     def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
-        hex_code = device_code.hex
+        hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_write_config"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
