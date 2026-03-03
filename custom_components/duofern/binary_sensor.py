@@ -487,6 +487,7 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
+        self._device_code = device_state.device_code
         self._reading_key = reading_key
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{reading_key}"
         self._attr_translation_key = translation_key
