@@ -310,22 +310,22 @@
   },
   "device_automation": {
     "trigger_type": {
-      "channel_01": "Kanal 1",
-      "channel_02": "Kanal 2",
-      "channel_03": "Kanal 3",
-      "channel_04": "Kanal 4",
-      "channel_05": "Kanal 5",
-      "channel_06": "Kanal 6"
+      "channel_01": "Kanal 1 – {subtype}",
+      "channel_02": "Kanal 2 – {subtype}",
+      "channel_03": "Kanal 3 – {subtype}",
+      "channel_04": "Kanal 4 – {subtype}",
+      "channel_05": "Kanal 5 – {subtype}",
+      "channel_06": "Kanal 6 – {subtype}"
     },
     "trigger_subtype": {
-      "up": "Taste Hoch gedrückt",
-      "stop": "Taste Stop gedrückt",
-      "down": "Taste Runter gedrückt",
-      "stepUp": "Taste Schritt hoch gedrückt",
-      "stepDown": "Taste Schritt runter gedrückt",
-      "pressed": "Taste gedrückt",
-      "on": "Taste Ein gedrückt",
-      "off": "Taste Aus gedrückt"
+      "up": "Hoch",
+      "stop": "Stop",
+      "down": "Runter",
+      "stepUp": "Schritt hoch",
+      "stepDown": "Schritt runter",
+      "pressed": "Gedrückt",
+      "on": "Ein",
+      "off": "Aus"
     }
   }
 }

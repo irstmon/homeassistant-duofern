@@ -302,22 +302,22 @@
   },
   "device_automation": {
     "trigger_type": {
-      "channel_01": "Channel 1",
-      "channel_02": "Channel 2",
-      "channel_03": "Channel 3",
-      "channel_04": "Channel 4",
-      "channel_05": "Channel 5",
-      "channel_06": "Channel 6"
+      "channel_01": "Channel 1 – {subtype}",
+      "channel_02": "Channel 2 – {subtype}",
+      "channel_03": "Channel 3 – {subtype}",
+      "channel_04": "Channel 4 – {subtype}",
+      "channel_05": "Channel 5 – {subtype}",
+      "channel_06": "Channel 6 – {subtype}"
     },
     "trigger_subtype": {
-      "up": "Button Up pressed",
-      "stop": "Button Stop pressed",
-      "down": "Button Down pressed",
-      "stepUp": "Button Step Up pressed",
-      "stepDown": "Button Step Down pressed",
-      "pressed": "Button pressed",
-      "on": "Button On pressed",
-      "off": "Button Off pressed"
+      "up": "Up",
+      "stop": "Stop",
+      "down": "Down",
+      "stepUp": "Step Up",
+      "stepDown": "Step Down",
+      "pressed": "Pressed",
+      "on": "On",
+      "off": "Off"
     }
   }
 }
