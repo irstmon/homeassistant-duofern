@@ -100,6 +100,13 @@ class DuoFernData:
     pairing_active: bool = False
     unpairing_active: bool = False
     pairing_remaining: int = 0
+    # Unique IDs of every entity created during the current setup run.
+    # Populated by each platform's async_setup_entry via
+    # coordinator.data.registered_unique_ids.update(...).
+    # Used by _async_cleanup_stale_devices in __init__.py to detect and remove
+    # entities that were registered in a previous version of the integration
+    # but are no longer created by the current code.
+    registered_unique_ids: set[str] = field(default_factory=set)
 
 
 class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):

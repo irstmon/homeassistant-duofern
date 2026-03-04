@@ -147,6 +147,11 @@ async def async_setup_entry(
             entities.append(DuoFernWriteConfigButton(coordinator, dev_code))
             entities.append(DuoFernSetTimeButton(coordinator, dev_code))
 
+    # Register this platform's unique_ids centrally so __init__.py can
+    # remove stale entities from previous integration versions.
+    coordinator.data.registered_unique_ids.update(
+        e._attr_unique_id for e in entities if hasattr(e, "_attr_unique_id")
+    )
     async_add_entities(entities)
 
 

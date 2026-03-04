@@ -208,13 +208,11 @@ async def _async_cleanup_stale_devices(
     # Always keep the USB stick itself
     paired_hexes.add(coordinator.system_code.hex)
 
-    # ── 2. Collect the unique_ids of every entity currently registered for
-    #       this config entry.  These are the entities that *should* exist. ───
-    current_unique_ids: set[str] = {
-        reg_entry.unique_id
-        for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id)
-        if reg_entry.unique_id is not None
-    }
+    # ── 2. The set of unique_ids that the current integration code actually
+    #       created this run — populated by each platform via coordinator.data.
+    #       registered_unique_ids.update(...) before calling async_add_entities.
+    #       This is the ground truth: anything NOT in this set is stale. ───────
+    current_unique_ids: set[str] = coordinator.data.registered_unique_ids
 
     # ── 3. Remove stale devices (and their child entities) ──────────────────
     for device_entry in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
