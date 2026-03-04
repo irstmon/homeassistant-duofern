@@ -57,24 +57,25 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 | Rauchmelder | `0xAB` | `binary_sensor` | ✅ |
 | Fenster-Tür-Kontakt | `0xAC` | `binary_sensor` | ❌ |
 | Umweltsensor | `0x69` | `sensor` | ❌ |
-| Sonnensensor | `0xA5` | `sensor` | ❌ |
-| Sonnen-/Windsensor | `0xA9` | `sensor` | ❌ |
-| Markisenwaechter | `0xAA` | `sensor` | ❌ |
+| Sonnensensor | `0xA5` | `binary_sensor` | ❌ |
+| Sonnensensor (alt) | `0xAF` | `binary_sensor` | ❌ |
+| Sonnen-/Windsensor | `0xA9` | `binary_sensor` | ❌ |
+| Markisenwaechter | `0xAA` | `binary_sensor` | ❌ |
 
 ### Remote Controls & Wall Buttons (event-only)
 
-| Description | Code | Notes |
-|-------------|------|-------|
-| Wandtaster | `0xA4` | Fires `duofern_event` on the HA event bus |
-| Wandtaster 6fach 230V | `0x74` | Fires `duofern_event` on the HA event bus |
-| Wandtaster 6fach Bat | `0xAD` | Fires `duofern_event` on the HA event bus |
-| Funksender UP | `0xA7` | Fires `duofern_event` on the HA event bus |
-| Handsender (6 Gruppen / 48 Geräte) | `0xA0` | Fires `duofern_event` on the HA event bus |
-| Handsender (1 Gruppe / 48 Geräte) | `0xA1` | Fires `duofern_event` on the HA event bus |
-| Handsender (6 Gruppen / 1 Gerät) | `0xA2` | Fires `duofern_event` on the HA event bus |
-| Handsender (1 Gruppe / 1 Gerät) | `0xA3` | Fires `duofern_event` on the HA event bus |
-| HomeTimer | `0xA8` | Fires `duofern_event` on the HA event bus |
-| Handzentrale | `0xE0` | Fires `duofern_event` on the HA event bus |
+| Description | Code | Notes | Tested |
+|-------------|------|-------|:------:|
+| Wandtaster | `0xA4` | Fires `duofern_event` on the HA event bus | ❌ |
+| Wandtaster 6fach 230V | `0x74` | Fires `duofern_event` on the HA event bus | ❌ |
+| Wandtaster 6fach Bat | `0xAD` | Fires `duofern_event` on the HA event bus | ❌ |
+| Funksender UP | `0xA7` | Fires `duofern_event` on the HA event bus | ❌ |
+| Handsender (6 Gruppen / 48 Geräte) | `0xA0` | Fires `duofern_event` on the HA event bus | ✅ |
+| Handsender (1 Gruppe / 48 Geräte) | `0xA1` | Fires `duofern_event` on the HA event bus | ❌ |
+| Handsender (6 Gruppen / 1 Gerät) | `0xA2` | Fires `duofern_event` on the HA event bus | ❌ |
+| Handsender (1 Gruppe / 1 Gerät) | `0xA3` | Fires `duofern_event` on the HA event bus | ❌ |
+| HomeTimer | `0xA8` | Fires `duofern_event` on the HA event bus | ❌ |
+| Handzentrale | `0xE0` | Fires `duofern_event` on the HA event bus | ❌ |
 
 **USB Stick:** Rademacher DuoFern USB-Stick 7000 and 9000 (VID: `0x0403`, PID: `0x6001`)
 
@@ -86,15 +87,18 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 - **Open / Close / Stop** — standard movement commands
 - **Set Position** — move to any position (0–100 %)
-- **Dusk position button** — move to the device's programmed dusk position. This uses the device's built-in dusk speed profile, which can be slower and quieter than a direct position command. Equivalent to `set DEVICE dusk` in FHEM.
+- **Dusk position button** — move to the device's programmed dusk position using the device's built-in speed profile. Equivalent to `set DEVICE dusk` in FHEM.
 - **Dawn position button** — move to the device's programmed dawn position. Equivalent to `set DEVICE dawn` in FHEM.
-- **Push-based state updates** — position and moving state update in real time as status frames arrive from the device
+- **Toggle button** — reverse current movement / change direction
+- **Push-based state updates** — position and moving state update in real time as status frames arrive
 - **All automation flags as entity attributes** — visible on the entity detail card and usable in automations:
   `dawnAutomatic`, `duskAutomatic`, `sunAutomatic`, `timeAutomatic`, `manualMode`, `sunMode`,
   `ventilatingMode`, `ventilatingPosition`, `sunPosition`, `windAutomatic`, `rainAutomatic`,
   `windMode`, `rainMode`, `windDirection`, `rainDirection`, `blindsMode`, `slatPosition`,
   `slatRunTime`, `tiltInSunPos`, `tiltInVentPos`, `reversal`, `motorDeadTime`, `runningTime`,
   and more — depending on device type and status format
+- **Obstacle / Block detection** — covers with detection hardware (0x42, 0x47, 0x49, 0x4B, 0x4C, 0x4E, 0x70) each get dedicated `obstacle` and `block` binary sensor entities, usable directly as State triggers in automations
+- **SX5 Light Curtain** — the SX5 garage door (0x4E) additionally gets a `light_curtain` binary sensor entity
 - **Firmware version** — shown in device info after first status frame
 - **Battery state** — shown as attribute where applicable
 
@@ -120,27 +124,48 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 - **HVAC modes** — HEAT and OFF
 - **All readings as attributes** — `temperatureThreshold1–4`, `actTempLimit`, `output`,
   `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `valvePosition`,
-  `sendingInterval`, `batteryPercent`
+  `sendingInterval`, `battery_level`
 
 ### Binary Sensor Entities (Motion, Smoke, Contact)
 
 - **Bewegungsmelder (0x65)** — `motion` device class, state updated via `duofern_event`
-- **Rauchmelder (0xAB)** — `smoke` device class, state updated via `duofern_event`
-- **Fenster-Tür-Kontakt (0xAC)** — `opening` device class, state updated via `duofern_event`
-- **Battery state** — `battery_state` (ok/low) and `battery_percent` shown as attributes
-- **SX5 Obstacle / Block / Light Curtain** — three dedicated binary sensor entities per SX5 garage door, updated push-based from every status frame:
+- **Rauchmelder (0xAB)** — `smoke` device class, state updated via `duofern_event`; battery level is persisted across HA restarts
+- **Fenster-Tür-Kontakt (0xAC)** — `opening` device class; two entities per device: `opened` and `tilted`
+- **Battery level** — `battery_state` (ok/low) and `battery_level` (0–100 %) shown as attributes on all battery-powered sensors
 
-  | Entity | Device Class | Triggered when |
-  |--------|-------------|----------------|
-  | Obstacle | `problem` | SX5 detected an obstacle during movement |
-  | Block | `problem` | SX5 is blocked and cannot move |
-  | Light Curtain | `safety` | The safety light curtain is active |
+### Binary Sensor Entities (Obstacle & Block Detection)
 
-  These are **fully triggerable** in HA automations as State triggers — see the [Automations](#automations) section.
+Covers with obstacle detection hardware get two dedicated binary sensor entities each:
 
-### Sensor Entities (Weather Station)
+| Entity | Device Class | Triggered when |
+|--------|-------------|----------------|
+| Obstacle | `problem` | Device detected an obstacle during movement |
+| Block | `problem` | Device is blocked and cannot move |
 
-One sensor entity per measurement per device:
+The SX5 garage door (0x4E) additionally gets:
+
+| Entity | Device Class | Triggered when |
+|--------|-------------|----------------|
+| Light Curtain | `safety` | The safety light curtain is active |
+
+Devices with obstacle detection: Rohrmotor-Aktor (`0x42`), Rohrmotor Steuerung (`0x47`), Rohrmotor (`0x49`), Connect-Aktor (`0x4B`), Troll Basis (`0x4C`), SX5 (`0x4E`), Troll Comfort DuoFern (`0x70`).
+
+These entities are **fully triggerable** in HA automations as State triggers — see the [Automations](#automations) section.
+
+### Binary Sensor Entities (Sun & Wind)
+
+Environmental sensor devices expose one or two binary sensor entities depending on their capabilities:
+
+| Device | Code | Sun sensor | Wind sensor |
+|--------|------|:----------:|:-----------:|
+| RolloTron Comfort Master (built-in) | `0x61` | ✅ | — |
+| Sonnensensor | `0xA5` / `0xAF` | ✅ | — |
+| Sonnen-/Windsensor | `0xA9` | ✅ | ✅ |
+| Markisenwaechter | `0xAA` | — | ✅ |
+
+### Sensor Entities (Weather Station — Umweltsensor 0x69)
+
+One sensor entity per measurement:
 
 | Sensor | Unit | Device Class |
 |--------|------|-------------|
@@ -156,28 +181,34 @@ Three buttons appear on the **DuoFern Stick device card**:
 
 | Button | What it does |
 |--------|-------------|
-| **Start pairing** | Opens a 60-second pairing window. During this time, press the pair button on a new DuoFern device to add it to the stick. The button is automatically disabled while another pairing or unpairing is already in progress. |
-| **Start unpairing** | Opens a 60-second unpairing window. Press the pair button on a paired device to remove it from the stick. |
-| **Status Broadcast** | Sends a broadcast status request to all paired devices, refreshing all states in HA. Useful after an HA restart or after making changes outside of HA. |
+| **Start pairing** | Opens a 60-second pairing window. Press the pair button on a new DuoFern device to add it. |
+| **Start unpairing** | Opens a 60-second unpairing window. Press the unpair button on a paired device to remove it. |
+| **Status Broadcast** | Sends a broadcast status request to all paired devices, refreshing all states in HA. |
 
-### Cover Dusk / Dawn Buttons
+### Per-Device Buttons
 
-Two additional buttons appear on **each cover device card**:
+| Button | Devices | What it does |
+|--------|---------|-------------|
+| **Dusk position** | All covers | Move to stored dusk position |
+| **Dawn position** | All covers | Move to stored dawn position |
+| **Toggle** | All covers | Reverse current movement / change direction |
+| **Reset settings** | Covers, switches, dimmers, climate | Reset device settings (keeps pairing) |
+| **Full reset** | Covers, switches, dimmers, climate | Factory reset (loses pairing) |
+| **Remote pair** | All actuators | Initiate remote pairing |
+| **Remote unpair** | All actuators | Remove remote pairing |
+| **Get status** | All actuators | Request current status from this device |
+| **Temp +** / **Temp −** | Climate | Increment/decrement target temperature by one step |
 
-| Button | What it does |
-|--------|-------------|
-| **Dusk position** | Commands the cover to move to its stored dusk position using the device's built-in speed profile. This is typically slower and quieter than using Set Position directly — ideal for evening closing routines. Equivalent to `set DEVICE dusk` in FHEM. |
-| **Dawn position** | Commands the cover to move to its stored dawn (open) position. Equivalent to `set DEVICE dawn` in FHEM. |
+### Remote Control Event Entities
 
-> **Note:** Dusk/Dawn *position* buttons are different from `duskAutomatic` / `dawnAutomatic` attributes. The buttons are explicit one-time movement commands. The attributes control whether the device's built-in time-based automation is active.
+Each paired Handsender or Wandtaster gets a dedicated **EventEntity** in HA. When a button is pressed, the entity fires with the action (`up`, `stop`, `down`, `stepUp`, `stepDown`, `pressed`, `on`, `off`) and channel number, making it directly usable in automations via the **Device trigger** UI — no YAML required.
 
 ### General
 
 - **Push-based, no polling** — devices push status updates; HA reflects changes immediately
-- **Status broadcast on startup** — on integration load, a full status broadcast is sent automatically (Step 7 of the init sequence), ensuring all device states are current even if HA was offline while changes were made
+- **Status broadcast on startup** — on integration load, a full status broadcast ensures all device states are current
 - **USB auto-discovery** — the stick is detected automatically via USB VID/PID when plugged in
-- **Battery visibility** — all battery-powered devices show `battery_state` and `battery_percent` as entity attributes
-- **Automations on obstacle** — SX5 obstacle/block/lightCurtain are individual binary sensor entities, not just attributes, so they can be used as State triggers directly
+- **Battery level** — all battery-powered devices show `battery_state` and `battery_level` as entity attributes; smoke detectors persist the last known battery level across HA restarts
 
 ---
 
@@ -208,7 +239,7 @@ Then restart Home Assistant.
 Go to **Settings → Devices & Services → Add Integration → DuoFern**
 
 - **Serial Port** — select your DuoFern USB stick (e.g., `/dev/ttyUSB0`)
-- **System Code** — the 6-digit hex dongle serial (starts with `6F`, e.g., `6F1A2B`). Find it in your previous FHEM config (`ATTR dongle CODE`) or on the stick label.
+- **System Code** — the 6-digit hex dongle serial (starts with `6F`, e.g., `6F1A2B`). Find it in your previous FHEM config (`ATTR dongle CODE`) or on the stick label. To preserve all existing pairings you need to use the same code as before! Otherwise all devices have to be re-paired
 
 ### Step 2: Paired Devices
 
@@ -230,43 +261,44 @@ Go to **Settings → Devices & Services → DuoFern → Configure** to add or re
 
 1. Note your system code and all device codes from FHEM (`list TYPE=DUOFERN`)
 2. Install this integration and enter the same codes during setup
-3. Device pairing is stored in the USB stick — **no re-pairing needed**
+3. Device pairing is stored in the DuoFern devices themselves and tied to the system code — **as long as you use the same system code during setup, all previously paired devices will respond without re-pairing. No re-pairing needed**
 4. All device states are refreshed automatically via the startup status broadcast
 
 ---
 
 ## Automations
 
-### Obstacle detection (SX5 Garage Door)
+### Obstacle detection (any cover with obstacle hardware)
 
 ```yaml
 trigger:
   - platform: state
-    entity_id: binary_sensor.duofern_sx5_xxxxxx_obstacle
+    entity_id: binary_sensor.duofern_rohrmotor_xxxxxx_obstacle
     to: "on"
 action:
   - service: cover.open_cover
     target:
-      entity_id: cover.duofern_sx5_xxxxxx
+      entity_id: cover.duofern_rohrmotor_xxxxxx
   - service: notify.notify
     data:
-      message: "Garage door obstacle detected — door re-opened."
+      message: "Obstacle detected — shutter re-opened."
 ```
 
-### React to remote control button presses
+### React to remote control button presses (event trigger)
 
 ```yaml
 trigger:
   - platform: event
     event_type: duofern_event
     event_data:
-      device_code: "A4XXXX"
-      event: "pressed"
+      device_code: "A0XXXX"
+      event: "up"
+      channel: "01"
 ```
 
-### Check whether an automation is active
+Or use the **Device trigger** UI in the automation editor — no YAML needed.
 
-All automation flags are entity attributes, usable in conditions:
+### Check whether an automation flag is active
 
 ```yaml
 condition:
@@ -332,7 +364,7 @@ python3 tools/pair_duofern.py pair --timeout 120 -v  # Extended timeout + debug
 - **Init sequence**: 7-step handshake (Init1 → Init2 → SetDongle → Init3 → SetPairs → InitEnd → StatusBroadcast)
 - **ACK-gated send queue**: One command in-flight at a time, 5-second timeout
 - **Push-based updates**: Devices send status frames proactively; coordinator calls `async_set_updated_data()` on each received frame
-- **Position convention**: DuoFern 0 = open / 100 = closed; HA 0 = closed / 100 = open (inverted transparently, matching the original HA addon)
+- **Position convention**: DuoFern 0 = open / 100 = closed; HA 0 = closed / 100 = open (inverted transparently)
 
 Implementation based on `10_DUOFERNSTICK.pm` and `30_DUOFERN.pm` from the FHEM project.
 
