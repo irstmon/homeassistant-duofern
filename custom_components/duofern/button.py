@@ -111,8 +111,10 @@ async def async_setup_entry(
             entities.append(DuoFernRemotePairButton(coordinator, dev_code))
             entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
 
-        # tempUp/tempDown for thermostat
-        if dev_code.is_climate:
+        # tempUp/tempDown only for 0x73 Raumthermostat (in %setsThermostat).
+        # NOT for 0xE1 HSA — that device uses the climate entity slider via
+        # the HSA pending protocol instead.
+        if dev_code.device_type == 0x73:
             entities.append(DuoFernTempUpButton(coordinator, dev_code))
             entities.append(DuoFernTempDownButton(coordinator, dev_code))
 
