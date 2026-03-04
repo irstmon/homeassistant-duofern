@@ -21,6 +21,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import CONF_DEVICE_CODE, CONF_PAIRED_DEVICES, CONF_SERIAL_PORT, DOMAIN
 from .coordinator import DuoFernCoordinator
@@ -95,6 +96,18 @@ async def async_setup_entry(
 
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator
+
+    # Register the USB stick as a device BEFORE platforms are set up.
+    # This is required so that child devices can reference it via via_device
+    # without triggering a "non existing via_device" warning.
+    registry = dr.async_get(hass)
+    registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, system_code.hex)},
+        manufacturer="Rademacher",
+        model="DuoFern USB-Stick 7000",
+        name=f"DuoFern Stick ({system_code.hex})",
+    )  
 
     # Listen for config entry updates (e.g., device list changes via options flow)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
