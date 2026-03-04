@@ -45,6 +45,7 @@ from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.components.binary_sensor import RestoreBinarySensor
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
@@ -259,7 +260,7 @@ async def async_setup_entry(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBinarySensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity):
+class DuoFernBinarySensor(CoordinatorEntity[DuoFernCoordinator], RestoreBinarySensor):
     """A DuoFern motion/smoke/contact sensor as a HA BinarySensorEntity.
 
     State is updated via HA event bus (duofern_event) because these devices
@@ -292,11 +293,31 @@ class DuoFernBinarySensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEnt
         )
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to DuoFern events on the HA event bus."""
+        """Subscribe to DuoFern events on the HA event bus.
+
+        For smoke detectors (0xAB): restore the last known battery_level from
+        the HA recorder so it survives restarts without waiting up to 24h for the
+        next battery frame.
+        """
         await super().async_added_to_hass()
         self.async_on_remove(
             self.hass.bus.async_listen(DUOFERN_EVENT, self._handle_duofern_event)
         )
+
+        if self._device_code.device_type == 0xAB:
+            last_state = await self.async_get_last_state()
+            if last_state and last_state.attributes:
+                battery_level = last_state.attributes.get("battery_level")
+                battery_state = last_state.attributes.get("battery_state")
+                state = self._device_state
+                if state is not None and battery_level is not None:
+                    state.battery_percent = int(battery_level)
+                    state.battery_state = battery_state
+                    _LOGGER.debug(
+                        "Restored battery_level=%s for smoke detector %s",
+                        battery_level,
+                        self._hex_code,
+                    )
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
