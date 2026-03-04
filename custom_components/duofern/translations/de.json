@@ -210,6 +210,9 @@
       },
       "back_jump": {
         "name": "Rücksprung"
+      },
+      "window_contact_automatic": {
+        "name": "Schließkontaktautomatik"
       }
     },
     "number": {

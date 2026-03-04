@@ -210,6 +210,9 @@
       },
       "back_jump": {
         "name": "Back Jump"
+      },
+      "window_contact_automatic": {
+        "name": "Window Contact Automatic"
       }
     },
     "number": {

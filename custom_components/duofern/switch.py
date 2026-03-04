@@ -85,7 +85,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Manual Mode",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:account-cog",
-        device_types=_ALL_ACTUATORS,
+        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
     ),
     DuoFernAutomationSwitchDescription(
         key="timeAutomatic",
@@ -95,7 +95,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Time Automatic",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:clock-check",
-        device_types=_ALL_ACTUATORS,
+        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
     ),
     DuoFernAutomationSwitchDescription(
         key="dawnAutomatic",
@@ -343,8 +343,8 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         key="windowContact",
         reading_key="windowContact",
         automation_name="windowContact",
-        translation_key="window_contact",
-        name="Window Contact",
+        translation_key="window_contact_automatic",
+        name="Window Contact Automatic",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:window-open",
         device_types=frozenset({0xE1}),
