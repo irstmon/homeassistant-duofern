@@ -40,11 +40,12 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
@@ -123,24 +124,58 @@ async def async_setup_entry(
     """
     coordinator: DuoFernCoordinator = entry.runtime_data
 
-    entities: list[DuoFernSensor] = []
+    entities: list[SensorEntity] = []
     for hex_code, device_state in coordinator.data.devices.items():
-        if not device_state.device_code.is_sensor:
-            continue
-        for description in SENSOR_DESCRIPTIONS:
+        dev_code = device_state.device_code
+
+        # Weather/environment sensor readings (Umweltsensor, Sonnensensor etc.)
+        if dev_code.is_sensor:
+            for description in SENSOR_DESCRIPTIONS:
+                entities.append(
+                    DuoFernSensor(
+                        coordinator=coordinator,
+                        device_state=device_state,
+                        hex_code=hex_code,
+                        description=description,
+                    )
+                )
+                _LOGGER.debug(
+                    "Adding sensor entity %s for device %s",
+                    description.key,
+                    hex_code,
+                )
+
+        # Battery sensor: created for every device type that is known to transmit
+        # battery data — either via dedicated 0FFF1323 battery frames (binary
+        # sensors 0xAB/0xAC/0x65) or embedded in regular status frames (0xE1
+        # format 29 batteryPercent, 0x73 Raumthermostat).
+        # Also created dynamically for any device that already has battery data
+        # stored (handles unknown future device types that happen to send it).
+        #
+        # The entity uses RestoreEntity so the last known value survives a
+        # restart without waiting for the next battery transmission.
+        # Statically known battery senders:
+        #   is_binary_sensor (0xAB/0xAC/0x65) always send 0FFF1323 battery frames.
+        #   0xE1 Heizkörperantrieb embeds batteryPercent in every format-29 status frame.
+        # 0x73 Raumthermostat is NOT included — it exists in both battery-powered and
+        # 230V variants and FHEM has no device-type filter on battery frames either.
+        # The fallback condition (battery_percent is not None) handles 0x73 and any
+        # other device type dynamically: once a battery frame has been received and
+        # stored by the coordinator, the entity is created on the next HA restart.
+        _sends_battery = (
+            dev_code.is_binary_sensor  # 0xAB, 0xAC, 0x65 — guaranteed 0FFF1323
+            or dev_code.device_type == 0xE1  # format-29 embeds batteryPercent
+            or device_state.battery_percent is not None  # seen at runtime from any type
+        )
+        if _sends_battery:
             entities.append(
-                DuoFernSensor(
+                DuoFernBatterySensor(
                     coordinator=coordinator,
                     device_state=device_state,
                     hex_code=hex_code,
-                    description=description,
                 )
             )
-            _LOGGER.debug(
-                "Adding sensor entity %s for device %s",
-                description.key,
-                hex_code,
-            )
+            _LOGGER.debug("Adding battery sensor for device %s", hex_code)
 
     if entities:
         async_add_entities(entities)
@@ -257,4 +292,138 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
                 )
+        self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Battery sensor — works for all device types that transmit battery data
+# ---------------------------------------------------------------------------
+
+
+class DuoFernBatterySensor(
+    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
+):
+    """A battery level sensor for any DuoFern device that transmits battery data.
+
+    Battery data reaches us via two paths:
+      1. Dedicated battery frame (0FFF1323) — binary sensors 0xAB/0xAC/0x65.
+         Stored as DuoFernDeviceState.battery_percent / battery_state by the
+         coordinator's _handle_battery_status().
+      2. Embedded in regular status frames — 0xE1 Heizkörperantrieb (format 29,
+         statusId 185) stores batteryPercent in ParsedStatus.readings.
+
+    The entity merges both sources, preferring the dedicated battery fields.
+    RestoreEntity ensures the last-known value is shown immediately after an
+    HA restart without waiting for the next battery transmission.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "battery"
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "%"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._device_code = device_state.device_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_battery"
+        self._restored_value: int | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known battery level from recorder on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            None,
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                self._restored_value = int(float(last_state.state))
+                _LOGGER.debug(
+                    "Restored battery level %s%% for device %s",
+                    self._restored_value,
+                    self._hex_code,
+                )
+            except (ValueError, TypeError):
+                pass
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        return self._device_state is not None
+
+    @property
+    def native_value(self) -> int | None:
+        """Return battery percentage.
+
+        Priority:
+          1. Live value from DuoFernDeviceState.battery_percent (0FFF1323 frame)
+          2. Live value from ParsedStatus.readings["batteryPercent"] (status frame)
+          3. Restored value from HA recorder (survives restarts)
+        """
+        state = self._device_state
+        if state is None:
+            return self._restored_value
+
+        # Source 1: dedicated battery frame
+        if state.battery_percent is not None:
+            return state.battery_percent
+
+        # Source 2: embedded in status readings (e.g. 0xE1 format 29)
+        raw = state.status.readings.get("batteryPercent")
+        if raw is not None:
+            try:
+                return int(raw)
+            except (ValueError, TypeError):
+                pass
+
+        # Source 3: restored value from last run
+        return self._restored_value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Expose battery_state (ok/low) as an additional attribute."""
+        state = self._device_state
+        if state is None or state.battery_state is None:
+            return {}
+        return {"battery_state": state.battery_state}
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        data = self.coordinator.data
+        state = data.devices.get(self._hex_code) if data else None
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._hex_code)},
+            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
+            manufacturer="Rademacher",
+            model=self._device_code.device_type_name,
+            serial_number=self._hex_code,
+            sw_version=state.status.version if state else None,
+            via_device=(DOMAIN, self.coordinator.system_code.hex),
+        )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Update entity when coordinator pushes new data."""
+        # Clear restored value once we have live data so we don't show stale
+        # data after the device has reported back.
+        state = self._device_state
+        if state is not None and (
+            state.battery_percent is not None
+            or state.status.readings.get("batteryPercent") is not None
+        ):
+            self._restored_value = None
         self.async_write_ha_state()

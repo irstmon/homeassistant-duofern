@@ -306,6 +306,9 @@
       },
       "sun_height": {
         "name": "Sun Height"
+      },
+      "battery": {
+        "name": "Battery"
       }
     }
   },

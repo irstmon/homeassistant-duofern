@@ -314,6 +314,9 @@
       },
       "sun_height": {
         "name": "Sonnenhöhe"
+      },
+      "battery": {
+        "name": "Batterie"
       }
     }
   },
