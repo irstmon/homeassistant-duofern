@@ -341,6 +341,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # the device to confirm. Without this, state.status = parsed would
             # overwrite our optimistic update and the UI snaps back.
             if device_code.device_type == 0xE1 and state.hsa_pending:
+                # Snapshot device readings BEFORE re-applying pending values.
+                # _send_hsa_if_pending needs the real device values for the
+                # changeFlag comparison (FHEM: $isValue = $statusValue{$key}).
+                device_readings_snapshot = dict(parsed.readings)
                 for key, (_, new_val) in state.hsa_pending.items():
                     state.status.readings[key] = new_val
                     if key == "desired-temp":
@@ -348,7 +352,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                             state.status.desired_temp = float(new_val)
                         except (TypeError, ValueError):
                             pass
-                asyncio.create_task(self._send_hsa_if_pending(device_code))
+                asyncio.create_task(
+                    self._send_hsa_if_pending(device_code, device_readings_snapshot)
+                )
 
         self.async_set_updated_data(self.data)
 
@@ -1175,10 +1181,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
     # commandsHSA bit layout — mirrors 30_DUOFERN.pm %commandsHSA
     _HSA_COMMANDS: dict[str, dict] = {
+        # min=0 matches FHEM %commandsHSA — raw value IS the minutes directly.
+        # The min=2 UI constraint lives in number.py only, not here.
         "sendingInterval": {
             "bit_from": 0,
             "change_flag": 7,
-            "min": 2,
+            "min": 0,
             "max": 60,
             "step": 1,
         },
@@ -1241,11 +1249,19 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             old_val,
         )
 
-    async def _send_hsa_if_pending(self, device_code: DuoFernId) -> None:
+    async def _send_hsa_if_pending(
+        self,
+        device_code: DuoFernId,
+        device_readings: dict,
+    ) -> None:
         """Build and send duoSetHSA if there are queued changes for this device.
 
         Called from _handle_status() when a 0xE1 status frame arrives.
         Mirrors FHEM lines 1213-1255.
+
+        device_readings must be the freshly-parsed readings from the device
+        status frame — NOT state.status.readings, which may already have been
+        overwritten with our optimistic pending values.
         """
         state = self.data.devices.get(device_code.hex)
         if state is None or not state.hsa_pending:
@@ -1262,8 +1278,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 _LOGGER.warning("_send_hsa_if_pending: unknown HSA key %s", key)
                 continue
 
-            # What does the device currently report for this key?
-            is_value = state.status.readings.get(key, 0)
+            # What does the DEVICE currently report for this key?
+            # Use device_readings (from parsed frame) not state.status.readings
+            # which has already been overwritten with our optimistic values.
+            is_value = device_readings.get(key, 0)
 
             # changeFlag=1 if device value matches what it was when user set,
             # meaning the device hasn't changed independently — safe to apply.
@@ -1329,7 +1347,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm %commandsHSA:
           sendingInterval: bitFrom=0, changeFlag=7, min=0, max=60, step=1
         """
-        clamped = max(2, min(60, value))
+        clamped = max(2, min(60, value))  # UI min=2, never send 0 or 1
         self._schedule_hsa_update(device_code, "sendingInterval", clamped)
 
     async def async_set_mode_change(self, device_code: DuoFernId) -> None:
