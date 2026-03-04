@@ -97,7 +97,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
   `windMode`, `rainMode`, `windDirection`, `rainDirection`, `blindsMode`, `slatPosition`,
   `slatRunTime`, `tiltInSunPos`, `tiltInVentPos`, `reversal`, `motorDeadTime`, `runningTime`,
   and more — depending on device type and status format
-- **Obstacle / Block detection** — covers with detection hardware (0x42, 0x47, 0x49, 0x4B, 0x4C, 0x4E, 0x70) each get dedicated `obstacle` and `block` binary sensor entities, usable directly as State triggers in automations
+- **Obstacle / Block detection** — the Rohrmotor (`0x49`) and SX5 (`0x4E`) get dedicated `obstacle` and `block` binary sensor entities, usable directly as State triggers in automations. The SX5 additionally gets a `light_curtain` entity. Other cover types may support this too but are unverified — open an issue if your device reports obstacle/block in FHEM. No real frames available yet.
 - **SX5 Light Curtain** — the SX5 garage door (0x4E) additionally gets a `light_curtain` binary sensor entity
 - **Firmware version** — shown in device info after first status frame
 - **Battery state** — shown as attribute where applicable
