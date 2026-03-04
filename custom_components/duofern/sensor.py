@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -176,6 +177,15 @@ async def async_setup_entry(
                 )
             )
             _LOGGER.debug("Adding battery sensor for device %s", hex_code)
+
+        # Last-seen timestamp sensor for every known device.
+        entities.append(
+            DuoFernLastSeenSensor(
+                coordinator=coordinator,
+                device_state=device_state,
+                hex_code=hex_code,
+            )
+        )
 
     # Register this platform's unique_ids centrally so __init__.py can
     # remove stale entities from previous integration versions.
@@ -432,3 +442,98 @@ class DuoFernBatterySensor(
         ):
             self._restored_value = None
         self.async_write_ha_state()
+
+
+# ---------------------------------------------------------------------------
+# Last-seen timestamp sensor — shown on device info card for every device
+# ---------------------------------------------------------------------------
+
+
+class DuoFernLastSeenSensor(
+    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
+):
+    """Sensor that shows when the device last sent any signal.
+
+    Updated on every status frame, sensor event, weather frame, and battery
+    frame. Uses SensorDeviceClass.TIMESTAMP so HA formats it as a human-
+    readable time ("3 minutes ago") in the device info card.
+
+    RestoreEntity ensures the timestamp survives HA restarts — without it
+    the sensor would show 'unknown' until the next frame arrives.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "last_seen"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:clock-outline"
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._device_code = device_state.device_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_last_seen"
+        self._restored_value: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known timestamp from recorder on startup."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            None,
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                # HA stores timestamps as ISO 8601 with timezone info
+                from homeassistant.util import dt as dt_util
+
+                self._restored_value = dt_util.parse_datetime(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        return self._device_state is not None
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return the last-seen timestamp as a timezone-aware datetime."""
+        state = self._device_state
+        if state is None or state.last_seen is None:
+            return self._restored_value
+
+        try:
+            from homeassistant.util import dt as dt_util
+
+            # last_seen is stored as ISO string without timezone — treat as local
+            naive = datetime.fromisoformat(state.last_seen)
+            aware = dt_util.as_local(naive)
+            return aware
+        except (ValueError, TypeError):
+            return self._restored_value
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        data = self.coordinator.data
+        state = data.devices.get(self._hex_code) if data else None
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._hex_code)},
+            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
+            manufacturer="Rademacher",
+            model=self._device_code.device_type_name,
+            serial_number=self._hex_code,
+            sw_version=state.status.version if state else None,
+            via_device=(DOMAIN, self.coordinator.system_code.hex),
+        )

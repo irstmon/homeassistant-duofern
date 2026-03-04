@@ -309,6 +309,9 @@
       },
       "battery": {
         "name": "Battery"
+      },
+      "last_seen": {
+        "name": "Last Seen"
       }
     }
   },
