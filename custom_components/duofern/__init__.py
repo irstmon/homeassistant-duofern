@@ -174,46 +174,83 @@ async def async_unload_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> 
 async def _async_cleanup_stale_devices(
     hass: HomeAssistant, entry: DuoFernConfigEntry
 ) -> None:
-    """Remove devices and entities that are no longer in the paired devices list.
+    """Remove stale devices and entities from the HA registry.
 
-    Called after platform setup so all current entities are registered first.
-    Mirrors the cleanup already present in number.py, but centrally for all
-    platforms — so removing a device code from the config cleans up everything.
+    Called once after all platforms have finished their setup, so every entity
+    that the current code wants to create is already registered before we start
+    removing things.
+
+    Two kinds of staleness are handled here:
+
+    1. **Stale devices** — a device code was removed from the DuoFern pairing
+       list (e.g. the user un-paired a roller shutter).  The device entry and
+       all its child entities are deleted from the registry.
+
+    2. **Stale entities on still-paired devices** — the integration was updated
+       and a particular entity type is no longer created for a given device type
+       (e.g. the "Remote Pair" / "Remote Unpair" buttons were removed for the
+       0xE1 Heizkörperantrieb, or an obstacle-detection binary sensor was
+       dropped because we verified the device doesn't report it).  These orphan
+       entities linger in the registry after an update until explicitly removed.
+
+    Strategy for (2): after all platforms ran their async_setup_entry the HA
+    entity registry already contains every *current* entity.  We collect the
+    unique_ids that belong to this config entry, compare them against all
+    registry entries for the entry, and delete the difference.  HA will
+    recreate any entity that should exist on the next startup automatically.
     """
-    paired_hexes: set[str] = set()
     coordinator: DuoFernCoordinator = entry.runtime_data
-    for hex_code in coordinator.data.devices:
-        # hex_code is already the full key (e.g. "43ABCD01" for channels,
-        # "61ABCD" for single devices) — match against device identifiers
-        paired_hexes.add(hex_code)
-
-    # Also keep the stick itself
-    system_hex = coordinator.system_code.hex
-    paired_hexes.add(system_hex)
-
     device_reg = dr.async_get(hass)
     entity_reg = er.async_get(hass)
 
+    # ── 1. Build the set of device identifier strings that are still paired ──
+    paired_hexes: set[str] = {hex_code for hex_code in coordinator.data.devices}
+    # Always keep the USB stick itself
+    paired_hexes.add(coordinator.system_code.hex)
+
+    # ── 2. Collect the unique_ids of every entity currently registered for
+    #       this config entry.  These are the entities that *should* exist. ───
+    current_unique_ids: set[str] = {
+        reg_entry.unique_id
+        for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id)
+        if reg_entry.unique_id is not None
+    }
+
+    # ── 3. Remove stale devices (and their child entities) ──────────────────
     for device_entry in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
-        # Check if this device's identifier still exists in paired devices
         device_idents = {
             ident[1] for ident in device_entry.identifiers if ident[0] == DOMAIN
         }
         if device_idents and not device_idents.intersection(paired_hexes):
-            # Remove all entities for this device first
+            # Device no longer paired — remove all its entities first, then
+            # the device itself so the registry stays consistent.
             for entity_entry in er.async_entries_for_device(
                 entity_reg, device_entry.id, include_disabled_entities=True
             ):
                 entity_reg.async_remove(entity_entry.entity_id)
                 _LOGGER.debug(
-                    "Removed stale entity %s (device %s no longer paired)",
+                    "Removed entity '%s' — parent device '%s' is no longer paired",
                     entity_entry.entity_id,
                     device_entry.name,
                 )
             device_reg.async_remove_device(device_entry.id)
             _LOGGER.info(
-                "Removed stale device %s (no longer in paired devices)",
+                "Removed device '%s' — no longer in paired devices list",
                 device_entry.name,
+            )
+
+    # ── 4. Remove stale entities on still-paired devices ────────────────────
+    # After step 3 the registry only contains entities for devices that are
+    # still paired.  Any entity whose unique_id is NOT in current_unique_ids
+    # was created by an older version of the integration and should be removed.
+    for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
+        if reg_entry.unique_id not in current_unique_ids:
+            entity_reg.async_remove(reg_entry.entity_id)
+            _LOGGER.debug(
+                "Removed stale entity '%s' (unique_id '%s' no longer created "
+                "by current integration version)",
+                reg_entry.entity_id,
+                reg_entry.unique_id,
             )
 
 

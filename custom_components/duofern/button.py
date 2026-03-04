@@ -88,17 +88,23 @@ async def async_setup_entry(
 
         # reset:settings,full for all devices that support it
         # From 30_DUOFERN.pm %setsBasic / %setsReset: covers, switches, dimmers
+        # 0xE1 Heizkörperantrieb uses %setsHSA which has no reset commands
         if (
             dev_code.is_cover
             or dev_code.is_switch
             or dev_code.is_light
-            or dev_code.is_climate
+            or (dev_code.is_climate and dev_code.device_type != 0xE1)
         ):
             entities.append(DuoFernResetSettingsButton(coordinator, dev_code))
             entities.append(DuoFernResetFullButton(coordinator, dev_code))
 
-        # remotePair/remoteUnpair — not for remotes or env sensors (no set commands)
-        if not dev_code.is_remote and not dev_code.is_env_sensor:
+        # remotePair/remoteUnpair — not for remotes, env sensors, or 0xE1 HSA
+        # 0xE1 Heizkörperantrieb uses %setsHSA which has no remotePair commands
+        if (
+            not dev_code.is_remote
+            and not dev_code.is_env_sensor
+            and dev_code.device_type != 0xE1
+        ):
             entities.append(DuoFernRemotePairButton(coordinator, dev_code))
             entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
 
@@ -116,8 +122,12 @@ async def async_setup_entry(
         )
         dev_type = dev_code.device_type
         # getStatus for all actuators (from %commandsStatus)
-        # Remotes and environmental sensors have no get commands in FHEM
-        if not dev_code.is_remote and not dev_code.is_env_sensor:
+        # Remotes, env sensors, and 0xE1 Heizkörperantrieb have no getStatus in FHEM
+        if (
+            not dev_code.is_remote
+            and not dev_code.is_env_sensor
+            and dev_code.device_type != 0xE1
+        ):
             entities.append(DuoFernGetStatusButton(coordinator, dev_code))
 
         # Umweltsensor 00 channel: getWeather, getTime, getConfig, writeConfig, setTime

@@ -38,7 +38,6 @@ from homeassistant.components.number import (
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -333,19 +332,6 @@ async def async_setup_entry(
                 entities.append(
                     DuoFernNumber(coordinator, device_state, hex_code, desc)
                 )
-
-    # Remove stale entities from the registry that are no longer valid
-    # (e.g. slat entities that were removed for non-blinds devices)
-    entity_registry = er.async_get(hass)
-    valid_unique_ids = {e._attr_unique_id for e in entities}
-    stale = [
-        entry
-        for entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id)
-        if entry.domain == "number" and entry.unique_id not in valid_unique_ids
-    ]
-    for stale_entry in stale:
-        entity_registry.async_remove(stale_entry.entity_id)
-        _LOGGER.debug("Removed stale number entity: %s", stale_entry.entity_id)
 
     if entities:
         async_add_entities(entities)
