@@ -137,6 +137,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._pairing_task: asyncio.Task[None] | None = None
         self._unpairing_task: asyncio.Task[None] | None = None
 
+        # Optional callback invoked when a new device is paired via the stick's
+        # pairing button. Registered by async_setup_entry in __init__.py so the
+        # new device's hex code can be persisted into the config entry data.
+        # Signature: (device_code: DuoFernId) -> None
+        self._on_new_device_paired: object = None
+
         # Pre-populate data with all known devices
         self.data = DuoFernData()
         self._register_all_devices()
@@ -177,6 +183,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def register_on_new_device_paired(self, callback: object) -> None:
+        """Register a callback invoked when a new device is paired.
+
+        Called by async_setup_entry so the new hex code can be written back
+        to the config entry and reloaded without user interaction.
+        """
+        self._on_new_device_paired = callback
 
     async def async_connect(self) -> None:
         """Connect the USB stick and start protocol I/O.
@@ -480,6 +494,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         state = self.data.devices.get(device_code.hex)
         if state:
             state.last_paired = datetime.now().isoformat(timespec="seconds")
+        else:
+            # This is a brand-new device not yet in our paired list.
+            # Notify __init__.py so it can persist the code into the config
+            # entry and trigger a reload — after which the device will be
+            # fully registered with all its entities.
+            _LOGGER.info(
+                "New device paired: %s — adding to config entry", device_code.hex
+            )
+            if callable(self._on_new_device_paired):
+                self._on_new_device_paired(device_code)
         self.async_set_updated_data(self.data)
 
     def _handle_unpair_response(self, frame: bytearray) -> None:

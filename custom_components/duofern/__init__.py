@@ -128,6 +128,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator
 
+    # Register callback so the coordinator can notify us when a brand-new
+    # device is paired via the stick's pairing button.  We then persist its
+    # hex code into the config entry's paired_devices list and reload the
+    # integration so HA creates all the correct entities for the new device.
+    def _on_new_device_paired(device_code: object) -> None:
+        """Persist a newly paired device and reload the integration."""
+        if not isinstance(device_code, DuoFernId):
+            return
+        current: list[str] = list(entry.data.get(CONF_PAIRED_DEVICES, []))
+        if device_code.hex in current:
+            _LOGGER.debug(
+                "Device %s already in paired list — skipping update",
+                device_code.hex,
+            )
+            return
+        current.append(device_code.hex)
+        _LOGGER.info(
+            "Persisting new paired device %s into config entry (%d total)",
+            device_code.hex,
+            len(current),
+        )
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_PAIRED_DEVICES: current}
+        )
+        # Reload so HA creates entities for the new device
+        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+
+    coordinator.register_on_new_device_paired(_on_new_device_paired)
+
     # Register the USB stick as a device BEFORE platforms are set up.
     # This is required so that child devices can reference it via via_device
     # without triggering a "non existing via_device" warning.
