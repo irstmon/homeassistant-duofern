@@ -990,7 +990,10 @@ class DuoFernDecoder:
 
         device_code = DuoFernDecoder.extract_device_code(frame)
         chan_pos: int = spec["chan"]
-        chan_raw = frame[chan_pos] if chan_pos < FRAME_SIZE_BYTES else 0
+        # FHEM: substr($msg, chan*2 + 2, 2)
+        # The +2 (hex chars) = +1 byte offset. So byte position = chan + 1.
+        byte_pos = chan_pos + 1
+        chan_raw = frame[byte_pos] if byte_pos < FRAME_SIZE_BYTES else 0
         chan_hex = f"{chan_raw:02X}"
 
         # Devices 0x61, 0x70, 0x71 always use channel "01"
