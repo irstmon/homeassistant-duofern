@@ -907,7 +907,9 @@ class DuoFernDecoder:
         device_code = DuoFernDecoder.extract_device_code_from_status(frame)
         result.device_code = device_code.hex
 
-        # Firmware version at byte 12: high nibble = major, low nibble = minor
+        # Firmware version: most formats encode it in frame[12] as nibbles (FHEM:
+        # substr($msg,24,1).".".substr($msg,25,1)). Format 29 (0xE1) uses StatusID
+        # 998 via the normal STATUS_GROUPS parse path instead — overridden below.
         ver_byte = frame[12]
         result.version = (
             f"{(ver_byte >> 4) & 0x0F}.{ver_byte & 0x0F}" if ver_byte != 0 else None
@@ -943,6 +945,11 @@ class DuoFernDecoder:
         if readings.get("blindsMode") == "off":
             for key in BLIND_MODE_READINGS:
                 readings.pop(key, None)
+
+        # If parsing produced a 'version' reading (StatusID 998, format 29),
+        # it is more accurate than the frame[12] nibble fallback above.
+        if "version" in readings:
+            result.version = str(readings.pop("version"))
 
         result.readings = readings
 
