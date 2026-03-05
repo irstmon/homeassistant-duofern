@@ -259,12 +259,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         paired: list[str] = self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
         if device_code.hex in paired:
             return
-        if device_code.device_name.startswith("Unknown"):
+        if device_code.device_type_name.startswith("Unknown"):
             return
         _LOGGER.info(
             "Unbekanntes DuoFern-Gerät empfangen: %s (%s) — Discovery wird gestartet",
             device_code.hex,
-            device_code.device_name,
+            device_code.device_type_name,
         )
         from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY  # noqa: PLC0415
 
@@ -274,7 +274,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 context={"source": SOURCE_INTEGRATION_DISCOVERY},
                 data={
                     "device_hex": device_code.hex,
-                    "device_name": device_code.device_name,
+                    "device_name": device_code.device_type_name,
                     "entry_id": self._config_entry.entry_id,
                 },
             )

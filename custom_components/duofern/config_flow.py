@@ -190,8 +190,11 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         device_name: str = discovery_info["device_name"]
         entry_id: str = discovery_info["entry_id"]
 
-        # Unique id prevents the same device appearing twice in inbox
-        await self.async_set_unique_id(f"{entry_id}_{device_hex}")
+        # raise_on_progress=False: allow a new flow even if a previous
+        # flow for this device was already in progress or aborted.
+        await self.async_set_unique_id(
+            f"{entry_id}_{device_hex}", raise_on_progress=False
+        )
         self._abort_if_unique_id_configured()
 
         # Store for use in async_step_confirm
