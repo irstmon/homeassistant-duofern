@@ -24,8 +24,8 @@
         }
       },
       "confirm_discovery": {
-        "title": "{name} hinzufügen",
-        "description": "Gerät **{device_name}** (Code: `{device_hex}`) wurde empfangen. Soll es zur Integration hinzugefügt werden?"
+        "title": "DuoFern Gerät hinzufügen",
+        "description": "Soll **{name}** zur Integration hinzugefügt werden?"
       }
     },
     "error": {

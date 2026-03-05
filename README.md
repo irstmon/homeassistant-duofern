@@ -123,15 +123,17 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 - **Current temperature** — measured temperature from the device
 - **HVAC modes** — HEAT and OFF
 - **All readings as attributes** — `temperatureThreshold1–4`, `actTempLimit`, `output`,
-  `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `valvePosition`,
-  `sendingInterval`, `battery_level`
+  `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `sendingInterval`
+- **Valve Position sensor** — dedicated sensor entity (0–100 %) for the Heizkörperantrieb (`0xE1`), visible on the device card
+- **Battery sensor** — dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
+- **Window Open switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C)
 
 ### Binary Sensor Entities (Motion, Smoke, Contact)
 
 - **Bewegungsmelder (0x65)** — `motion` device class, state updated via `duofern_event`
 - **Rauchmelder (0xAB)** — `smoke` device class, state updated via `duofern_event`; battery level is persisted across HA restarts
 - **Fenster-Tür-Kontakt (0xAC)** — `opening` device class; two entities per device: `opened` and `tilted`
-- **Battery level** — `battery_state` (ok/low) and `battery_level` (0–100 %) shown as attributes on all battery-powered sensors
+- **Battery sensor** — battery-powered sensors (Bewegungsmelder `0x65`, Rauchmelder `0xAB`, Fenster-Tür-Kontakt `0xAC`) get a dedicated **Battery** diagnostic sensor entity (0–100 %) visible on the device card. The last known value persists across HA restarts. `battery_state` (ok/low) is exposed as an attribute on the battery entity
 
 ### Binary Sensor Entities (Obstacle & Block Detection)
 
@@ -208,7 +210,10 @@ Each paired Handsender or Wandtaster gets a dedicated **EventEntity** in HA. Whe
 - **Push-based, no polling** — devices push status updates; HA reflects changes immediately
 - **Status broadcast on startup** — on integration load, a full status broadcast ensures all device states are current
 - **USB auto-discovery** — the stick is detected automatically via USB VID/PID when plugged in
-- **Battery level** — all battery-powered devices show `battery_state` and `battery_level` as entity attributes; smoke detectors persist the last known battery level across HA restarts
+- **Battery sensor entity** — all battery-powered devices get a dedicated **Battery** diagnostic sensor entity on the device card. The last known value persists across HA restarts
+- **Last Seen sensor** — every device gets a `Last Seen` timestamp sensor that updates whenever a frame is received, with `RestoreEntity` persistence
+- **Automatic device discovery** *(opt-in)* — unknown devices that send frames but are not yet in your paired list automatically appear in the HA Discovered inbox. Enable under **Settings → Devices & Services → DuoFern → Configure**. See [Automatic Device Discovery](#automatic-device-discovery) below
+- **Auto-add on pairing** — when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
 
 ---
 
@@ -254,6 +259,16 @@ These are the device codes from your FHEM configuration (`ATTR device CODE`).
 ### Managing Devices After Setup
 
 Go to **Settings → Devices & Services → DuoFern → Configure** to add or remove device codes at any time. The integration reloads automatically.
+
+### Automatic Device Discovery
+
+If you enable **"Automatically discover unknown devices"** in the options, any DuoFern device that sends a frame but is not yet in your paired list will automatically appear in **Settings → Devices & Services → Discovered**:
+
+- The device is only shown if its type is recognized (known Rademacher device — not radio noise)
+- Click **Add** to add it to your paired list and reload the integration
+- Click **Ignore** to permanently suppress it — HA handles this natively and it will never reappear
+
+This is useful if you forgot to add a device code during setup, or want to discover the hex code of a device without looking it up in FHEM.
 
 ---
 

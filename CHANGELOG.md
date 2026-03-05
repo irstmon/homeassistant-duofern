@@ -1,5 +1,31 @@
 # Changelog
 
+## [v2.0.2] — 2026-03-05
+
+### New Features
+
+#### Automatic Device Discovery (opt-in)
+Unknown DuoFern devices that send frames but are not yet in your device list can now automatically appear in the Home Assistant **Discovered** inbox (`Settings → Devices & Services → Discovered`).
+
+- Enable the feature under **Settings → Devices & Services → Rademacher DuoFern → Configure → Automatically discover unknown devices**
+- A device only appears in the inbox if its type is recognized (i.e. it is a known Rademacher device type, not radio noise)
+- Clicking **Add** adds the device code to your paired list and reloads the integration automatically
+- Clicking **Ignore** permanently suppresses that device — Home Assistant handles this natively and it will never reappear
+
+#### Auto-add Newly Paired Devices
+When a new device is learned via the DuoFern stick's pairing button, its hex code is now automatically written into the integration's device list and the integration reloads. Previously you had to manually add the code via the options flow.
+
+#### Battery Sensor Entity
+Battery-powered devices (smoke detectors `0xAB`, window/door contacts `0xAC`, motion sensors `0x65`, and the `0xE1` Heizkörperantrieb) now get a dedicated **Battery** sensor entity visible on the device page under the *Diagnostic* section. The last known value is restored across Home Assistant restarts.
+
+The `0x73` Raumthermostat is intentionally excluded from the static battery entity list because it exists in both battery-powered and 230V variants. It will receive a battery entity dynamically once a battery frame has been observed.
+
+### Bug Fixes
+
+- **Stale entity cleanup now works correctly** — entities that were removed in a previous integration version (e.g. buttons that no longer apply to a device type) are now properly deleted from the registry on startup. Previously the cleanup logic compared the registry against itself, so nothing was ever removed.
+- **Binary sensors no longer show remote pairing / get-status buttons** — smoke detectors (`0xAB`), window contacts (`0xAC`), and motion sensors (`0x65`) are pure event senders with no set commands and now correctly have those buttons excluded.
+- **`device_type_name` attribute error fixed** — receiving a frame from an unknown device no longer causes an `AttributeError` crash in the coordinator.
+
 ## [v2.0.1] - 2026-03-04
 
 ### Radiator Valve (0xE1) — Complete Rework
