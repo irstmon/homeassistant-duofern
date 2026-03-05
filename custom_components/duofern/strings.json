@@ -24,7 +24,7 @@
         }
       },
       "confirm_discovery": {
-        "title": "Add DuoFern {device_name}",
+        "title": "Add {name}",
         "description": "Device **{device_name}** (code: `{device_hex}`) was received. Do you want to add it to the integration?"
       }
     },

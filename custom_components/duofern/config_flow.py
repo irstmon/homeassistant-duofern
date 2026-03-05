@@ -203,6 +203,8 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovered_entry_id = entry_id
 
         self.context["title_placeholders"] = {
+            # HA uses "name" key as the inbox card title fallback
+            "name": f"DuoFern {device_name} ({device_hex})",
             "device_name": device_name,
             "device_hex": device_hex,
         }
@@ -230,6 +232,7 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="confirm_discovery",
+            data_schema=vol.Schema({}),
             description_placeholders={
                 "device_name": self._discovered_device_name,
                 "device_hex": self._discovered_device_hex,
