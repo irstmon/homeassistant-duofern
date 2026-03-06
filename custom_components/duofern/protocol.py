@@ -238,6 +238,14 @@ class ParsedStatus:
     measured_temp: float | None = None
     desired_temp: float | None = None
 
+    # Boost mode fields — only populated for 0xE1 Heizkörperantrieb (format 29).
+    # boost_active: True when frame subtype == 0xF0 (desired-temp = 28°C).
+    # boost_duration_min: originally set duration in minutes (byte[12] & 0x3F).
+    #   Does NOT count down — always shows the value from the last Boost-ON command.
+    #   Value 9 is the factory default (no boost ever set).
+    boost_active: bool = False
+    boost_duration_min: int = 0
+
     missing_ack: bool = False  # NACK 810108AA
     not_initialized: bool = False  # NACK 81010C55
 
@@ -741,8 +749,17 @@ class DuoFernDecoder:
         From 30_DUOFERN.pm:
           #Status Nachricht Aktor
           if ($msg =~ m/0FFF0F.{38}/) { ... }
+
+        Format 0x2A is explicitly excluded: it is a device-to-stick ACK sent
+        after a boost activation (payload always 08 F2 55) and must never be
+        parsed as a status frame — doing so wipes all entity state because
+        parse_status() returns an empty ParsedStatus for the unknown format.
         """
         f = DuoFernDecoder._ensure_bytes(data)
+        if len(f) < 4:
+            return False
+        if f[3] == 0x2A:  # Gerät-ACK nach Boost — ignorieren (NOTES.md: "nicht parsen")
+            return False
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 
     @staticmethod
@@ -1020,6 +1037,16 @@ class DuoFernDecoder:
                 )
             except (TypeError, ValueError):
                 pass
+
+        # Boost detection for 0xE1 Heizkörperantrieb (format 29).
+        # Boost active:   frame[4] (subtype) == 0xF0 → desired-temp = 28°C
+        # Boost duration: frame[12] & 0x3F minutes (upper 2 bits = rolling counter)
+        #   0x09 (9) is the factory default — no boost ever set.
+        #   After a boost the value stays at the set duration even after boost ends.
+        # Confirmed by live frame captures: 4 min → 0x04, 30 min → 0x1E, 60 min → 0x3C.
+        if fmt == "29":
+            result.boost_active = frame[4] == 0xF0
+            result.boost_duration_min = frame[12] & 0x3F
 
         return result
 

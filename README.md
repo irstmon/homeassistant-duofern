@@ -16,7 +16,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 | Description | Code | HA Platform | Tested |
 |-------------|------|-------------|:------:|
-| RolloTron Standard | `0x40` | `cover` | ❌ |
+| RolloTron Standard | `0x40` | `cover` | ✅ |
 | RolloTron Comfort Slave | `0x41` | `cover` | ❌ |
 | Rohrmotor-Aktor | `0x42` | `cover` | ❌ |
 | Rohrmotor Steuerung | `0x47` | `cover` | ❌ |
@@ -57,7 +57,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 | Rauchmelder | `0xAB` | `binary_sensor` | ✅ |
 | Fenster-Tür-Kontakt | `0xAC` | `binary_sensor` | ❌ |
 | Umweltsensor | `0x69` | `sensor` | ❌ |
-| Sonnensensor | `0xA5` | `binary_sensor` | ❌ |
+| Sonnensensor | `0xA5` | `binary_sensor` | ✅ |
 | Sonnensensor (alt) | `0xAF` | `binary_sensor` | ❌ |
 | Sonnen-/Windsensor | `0xA9` | `binary_sensor` | ❌ |
 | Markisenwaechter | `0xAA` | `binary_sensor` | ❌ |
@@ -119,7 +119,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 ### Climate Entities (Thermostats & Radiator Valves)
 
-- **Target temperature** — set desired temperature (4.0–30.0 °C in 0.5 °C steps)
+- **Target temperature** — set desired temperature (4.0–28.0 °C in 0.5 °C steps)
 - **Current temperature** — measured temperature from the device
 - **HVAC modes** — HEAT and OFF
 - **All readings as attributes** — `temperatureThreshold1–4`, `actTempLimit`, `output`,

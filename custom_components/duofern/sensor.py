@@ -189,6 +189,32 @@ async def async_setup_entry(
                 )
             )
 
+        # Boost sensors for 0xE1 Heizkörperantrieb:
+        #   1. Binary sensor: boost aktiv (on/off)
+        #   2. Sensor: Boost-Dauer in Minuten (zuletzt gesetzt)
+        #   3. Sensor: Boost-Startzeitpunkt (Timestamp)
+        if dev_code.device_type == 0xE1:
+            entities.append(
+                DuoFernBoostActiveSensor(
+                    coordinator=coordinator,
+                    device_state=device_state,
+                    hex_code=hex_code,
+                )
+            )
+            entities.append(
+                DuoFernBoostDurationSensor(
+                    coordinator=coordinator,
+                    device_state=device_state,
+                    hex_code=hex_code,
+                )
+            )
+            entities.append(
+                DuoFernBoostStartSensor(
+                    coordinator=coordinator,
+                    device_state=device_state,
+                    hex_code=hex_code,
+                )
+            )
         # Last-seen timestamp sensor for every known device.
         entities.append(
             DuoFernLastSeenSensor(
@@ -613,3 +639,190 @@ class DuoFernLastSeenSensor(
             sw_version=state.status.version if state else None,
             via_device=(DOMAIN, self.coordinator.system_code.hex),
         )
+
+
+# ---------------------------------------------------------------------------
+# Boost sensors — 0xE1 Heizkörperantrieb
+# ---------------------------------------------------------------------------
+
+
+class DuoFernBoostActiveSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+    """Binary-style sensor: is boost mode currently active?
+
+    Boost is active when the device sends a status frame with subtype 0xF0
+    (desired-temp = 28°C). Reverts to inactive on subtype 0xD4/0xE0.
+
+    Implemented as a SensorEntity (not BinarySensorEntity) so it lives in the
+    same "Sensoren" section as the other boost entities on the device card.
+    State is "on" or "off".
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "boost_active"
+    _attr_icon = "mdi:radiator"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_active"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        state = self._device_state
+        return state is not None and state.available
+
+    @property
+    def native_value(self) -> str | None:
+        state = self._device_state
+        if state is None:
+            return None
+        return "on" if state.status.boost_active else "off"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DuoFernBoostDurationSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+    """Sensor showing the boost duration that was last set (in minutes).
+
+    Decoded from frame byte[12] & 0x3F.
+    The value does NOT count down — it always shows the originally set duration.
+    Factory default value 9 is filtered out and shown as 0 (no boost set yet).
+
+    Confirmed values: 4 min → 4, 30 min → 30, 60 min → 60, device button → 60.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "boost_duration"
+    _attr_native_unit_of_measurement = "min"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:timer-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 0
+
+    # Factory default — means "no boost ever set", show as 0
+    _FACTORY_DEFAULT = 9
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_duration"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        state = self._device_state
+        return state is not None and state.available
+
+    @property
+    def native_value(self) -> int | None:
+        state = self._device_state
+        if state is None:
+            return None
+        duration = state.status.boost_duration_min
+        # Factory default 9 = no boost ever configured
+        return 0 if duration == self._FACTORY_DEFAULT else duration
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
+
+class DuoFernBoostStartSensor(
+    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
+):
+    """Timestamp sensor: when was the last boost started?
+
+    Set in the coordinator when boost transitions from inactive → active
+    (first 0xF0 frame after a 0xD4/0xE0 frame).
+
+    Uses RestoreEntity so the last known start time survives HA restarts.
+    HA renders datetime sensors as relative time: "vor 13 Minuten".
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "boost_started"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-start"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_started"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._restored_value: datetime | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            None,
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                from homeassistant.util import dt as dt_util
+
+                self._restored_value = dt_util.parse_datetime(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        state = self._device_state
+        return state is not None and state.available
+
+    @property
+    def native_value(self) -> datetime | None:
+        state = self._device_state
+        if state is None or state.boost_start is None:
+            return self._restored_value
+
+        from homeassistant.util import dt as dt_util
+
+        naive = state.boost_start
+        # boost_start is stored as naive local datetime — make timezone-aware
+        if naive.tzinfo is None:
+            return dt_util.as_local(naive)
+        return naive
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()

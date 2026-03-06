@@ -321,6 +321,15 @@
       },
       "valve_position": {
         "name": "Valve Position"
+      },
+      "boost_active": {
+        "name": "Boost"
+      },
+      "boost_duration": {
+        "name": "Boost Duration"
+      },
+      "boost_started": {
+        "name": "Boost Started"
       }
     }
   },

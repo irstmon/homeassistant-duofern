@@ -102,6 +102,11 @@ class DuoFernDeviceState:
     # when the 0xE1 device next sends a status frame.
     hsa_pending: dict[str, tuple[object, object]] = field(default_factory=dict)
 
+    # Timestamp of the most recent Boost-ON frame (subtype 0xF0) for 0xE1 devices.
+    # Set in _handle_status() when boost_active transitions False→True.
+    # Not reset when boost ends so the UI can show "last boost started at X".
+    boost_start: datetime | None = None
+
 
 @dataclass
 class DuoFernData:
@@ -372,6 +377,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 _LOGGER.debug("Status from unknown device %s — ignoring", hex_code)
                 return
             parsed = DuoFernDecoder.parse_status(frame)
+
+            # Read boost_active from the PREVIOUS status BEFORE overwriting
+            # state.status — otherwise the False→True edge detection below
+            # compares parsed against itself and never fires correctly.
+            prev_boost_active = state.status.boost_active
+
             state.status = parsed
             state.available = True
             state.last_seen = datetime.now().isoformat(timespec="seconds")
@@ -385,21 +396,28 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # the UI keeps showing the user's intended value while we wait for
             # the device to confirm. Without this, state.status = parsed would
             # overwrite our optimistic update and the UI snaps back.
-            if device_code.device_type == 0xE1 and state.hsa_pending:
-                # Snapshot device readings BEFORE re-applying pending values.
-                # _send_hsa_if_pending needs the real device values for the
-                # changeFlag comparison (FHEM: $isValue = $statusValue{$key}).
-                device_readings_snapshot = dict(parsed.readings)
-                for key, (_, new_val) in state.hsa_pending.items():
-                    state.status.readings[key] = new_val
-                    if key == "desired-temp":
-                        try:
-                            state.status.desired_temp = float(new_val)
-                        except (TypeError, ValueError):
-                            pass
-                asyncio.create_task(
-                    self._send_hsa_if_pending(device_code, device_readings_snapshot)
-                )
+            if device_code.device_type == 0xE1:
+                # Track boost start time: fires only on the False→True transition.
+                # Uses prev_boost_active (captured before state.status was replaced)
+                # so the rising edge is correctly detected on every boost start.
+                if parsed.boost_active and not prev_boost_active:
+                    state.boost_start = datetime.now()
+
+                if state.hsa_pending:
+                    # Snapshot device readings BEFORE re-applying pending values.
+                    # _send_hsa_if_pending needs the real device values for the
+                    # changeFlag comparison (FHEM: $isValue = $statusValue{$key}).
+                    device_readings_snapshot = dict(parsed.readings)
+                    for key, (_, new_val) in state.hsa_pending.items():
+                        state.status.readings[key] = new_val
+                        if key == "desired-temp":
+                            try:
+                                state.status.desired_temp = float(new_val)
+                            except (TypeError, ValueError):
+                                pass
+                    asyncio.create_task(
+                        self._send_hsa_if_pending(device_code, device_readings_snapshot)
+                    )
 
         self.async_set_updated_data(self.data)
 

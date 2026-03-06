@@ -55,9 +55,9 @@ from .protocol import DuoFernEncoder, DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 
-# Temperature range from 30_DUOFERN.pm $tempSetList: 4.0 .. 30.0 in 0.5 steps
+# Temperature range from 30_DUOFERN.pm $tempSetList: 4.0 .. 28.0 in 0.5 steps
 TEMP_MIN = 4.0
-TEMP_MAX = 30.0
+TEMP_MAX = 28.0
 TEMP_STEP = 0.5
 
 _SKIP_AS_ATTRIBUTE = {"desired-temp", "measured-temp", "measured-temp2"}
@@ -101,7 +101,7 @@ class DuoFernClimate(CoordinatorEntity[DuoFernCoordinator], ClimateEntity):
       OFF:  manualMode=on with desired-temp at minimum (FHEM behaviour)
 
     From 30_DUOFERN.pm %setsThermostat:
-      desired-temp:$tempSetList  — set target temperature (4.0-30.0°C)
+      desired-temp:$tempSetList  — set target temperature (4.0-28.0°C)
       manualMode:on,off          — bypass timer program
       timeAutomatic:on,off       — enable/disable timer
       temperatureThreshold1-4    — zone thresholds
@@ -216,7 +216,7 @@ class DuoFernClimate(CoordinatorEntity[DuoFernCoordinator], ClimateEntity):
         the next status response to confirm.
 
         From 30_DUOFERN.pm %setsThermostat:
-          desired-temp:$tempSetList (4.0-30.0°C in 0.5°C steps)
+          desired-temp:$tempSetList (4.0-28.0°C in 0.5°C steps)
         """
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:

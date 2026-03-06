@@ -329,6 +329,15 @@
       },
       "valve_position": {
         "name": "Ventil-Öffnungsgrad"
+      },
+      "boost_active": {
+        "name": "Boost"
+      },
+      "boost_duration": {
+        "name": "Boost-Dauer"
+      },
+      "boost_started": {
+        "name": "Boost gestartet"
       }
     }
   },
