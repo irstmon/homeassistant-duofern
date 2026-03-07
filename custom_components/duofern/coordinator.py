@@ -102,6 +102,11 @@ class DuoFernDeviceState:
     # when the 0xE1 device next sends a status frame.
     hsa_pending: dict[str, tuple[object, object]] = field(default_factory=dict)
 
+    # Pending Boost command: duration in minutes, or None if no boost queued.
+    # Sent as build_generic_command (0D01 29C608XX...) on next device contact.
+    # Separate from hsa_pending because it uses a different frame type.
+    boost_pending: int | None = None
+
     # Timestamp of the most recent Boost-ON frame (subtype 0xF0) for 0xE1 devices.
     # Set in _handle_status() when boost_active transitions False→True.
     # Not reset when boost ends so the UI can show "last boost started at X".
@@ -418,6 +423,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     asyncio.create_task(
                         self._send_hsa_if_pending(device_code, device_readings_snapshot)
                     )
+
+                if state.boost_pending is not None:
+                    asyncio.create_task(self._send_boost_if_pending(device_code))
 
         self.async_set_updated_data(self.data)
 
@@ -865,6 +873,28 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             temp, device_code, self._system_code
         )
         await self._stick.send_command(frame)
+
+    async def async_set_boost(self, device_code: DuoFernId, duration_min: int) -> None:
+        """Queue a Boost command for Heizkörperantrieb (0xE1).
+
+        Stores the duration in state.boost_pending. On the next device
+        contact (_handle_status), the pending boost is sent as a
+        build_generic_command frame — a different frame type from duoSetHSA.
+
+        Payload derived from OTA RTL-SDR captures (capture_1 / capture_3):
+          f[2..11] = 29 C6 08 [XX] 0F 02 40 00 27 85
+          XX = 0x88 for 9 min, 0xD8 for 35 min (encoding TBD — hardcoded for test)
+        """
+        duration_min = max(1, min(60, duration_min))
+        state = self.data.devices.get(device_code.hex)
+        if state is None:
+            return
+        state.boost_pending = duration_min
+        _LOGGER.info(
+            "Queued Boost for %s: %d min (sent on next device contact)",
+            device_code.hex,
+            duration_min,
+        )
 
     def _set_level(self, device_code: DuoFernId, level: int) -> None:
         state = self.data.devices.get(device_code.hex)
@@ -1397,6 +1427,54 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         # Clear pending regardless (mirrors FHEM delete HSAold)
         state.hsa_pending.clear()
+
+    async def _send_boost_if_pending(self, device_code: DuoFernId) -> None:
+        """Send queued Boost command on next device contact.
+
+        Called from _handle_status() when a 0xE1 status frame arrives and
+        state.boost_pending is set. Sends a build_generic_command frame —
+        a different frame type from duoSetHSA — with the OTA-derived payload.
+
+        Payload from OTA RTL-SDR captures (capture_1 9min, capture_3 35min):
+          f[2..11] = 29 C6 08 [XX] 0F 02 40 00 27 85
+          XX = 0x88 (9 min), 0xD8 (35 min) — exact encoding TBD, test with 0x88.
+        """
+        state = self.data.devices.get(device_code.hex)
+        if state is None or state.boost_pending is None:
+            return
+        if self._stick is None:
+            return
+
+        duration_min = state.boost_pending
+        # Boost byte: hardcoded 0x88 for first test (= confirmed 9 min from capture).
+        # TODO: derive formula for other durations once 0x88 is confirmed working.
+        boost_byte = 0x88
+
+        payload = bytes(
+            [
+                0x29,
+                0xC6,
+                0x08,
+                boost_byte,
+                0x0F,
+                0x02,
+                0x40,
+                0x00,
+                0x27,
+                0x85,
+            ]
+        )
+        frame = DuoFernEncoder.build_generic_command(
+            payload, device_code, self._system_code
+        )
+        await self._stick.send_command(frame)
+        _LOGGER.info(
+            "Sent Boost command to %s: %d min (boost_byte=0x%02X)",
+            device_code.hex,
+            duration_min,
+            boost_byte,
+        )
+        state.boost_pending = None
 
     async def async_set_window_contact(
         self, device_code: DuoFernId, enable: bool

@@ -118,6 +118,12 @@ async def async_setup_entry(
             entities.append(DuoFernTempUpButton(coordinator, dev_code))
             entities.append(DuoFernTempDownButton(coordinator, dev_code))
 
+        # Boost button for 0xE1 Heizkörperantrieb.
+        # Sends the OTA-derived Boost-Downlink frame directly via the stick.
+        # Test entity: hardcoded 9-minute duration until encoding is fully understood.
+        if dev_code.device_type == 0xE1:
+            entities.append(DuoFernBoostButton(coordinator, dev_code))
+
     # Per-device getStatus buttons for all actuators
     for hex_code, device_state in coordinator.data.devices.items():
         dev_code = (
@@ -672,3 +678,33 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
 
     async def async_press(self) -> None:
         await self.coordinator.async_write_weather_config(self._device_code)
+
+
+class DuoFernBoostButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Send a 9-minute Boost command to a 0xE1 Heizkörperantrieb.
+
+    Sends the real OTA-derived Boost-Downlink frame directly via the stick.
+    The stick queues it and delivers it when the valve next polls.
+    The valve drives to 100% and self-terminates after the set duration.
+
+    Frame derived from RTL-SDR OTA capture (capture_1, 9 min boost):
+      0D 01 0F 29 C6 08 0x88 0F 02 40 00 27 85 14 07 [SysCode] [DevCode] 00
+
+    Test entity — hardcoded 9 min until boost-byte encoding is fully confirmed.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:fire"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DuoFernCoordinator, device_code: DuoFernId) -> None:
+        super().__init__(coordinator)
+        self._device_code = device_code
+        hex_code = device_code.hex
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_test"
+        self._attr_name = "Boost Test (9 min)"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+
+    async def async_press(self) -> None:
+        """Send the 9-minute Boost frame to the valve via the stick."""
+        await self.coordinator.async_set_boost(self._device_code, 9)
