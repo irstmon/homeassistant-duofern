@@ -665,62 +665,6 @@ class DuoFernEncoder:
         f[21] = 0x00
         return f
 
-    @staticmethod
-    def build_boost_command(
-        duration_min: int,
-        device_code: "DuoFernId",
-        system_code: "DuoFernId",
-    ) -> bytearray:
-        """Build Boost command for Heizkörperantrieb (0xE1).
-
-        Derived from OTA capture analysis (capture_1, capture_3):
-          OTA Downlink payload: 0F 29 C6 08 [XX] 0F 02 40 00 27 85 14
-          FHEM frame layout (22 bytes):
-            f[0]     = 0x0D  (command)
-            f[1]     = 0x01  (channel)
-            f[2..12] = 11-byte payload (0F 29 C6 08 XX 0F 02 40 00 27 85)
-            f[13]    = 0x14  (end marker, from OTA payload last byte)
-            f[14]    = 0x07  (frame marker, matches FHEM uplink f[14])
-            f[15..17]= system_code
-            f[18..20]= device_code
-
-        Boost duration encoding (from two captured frames):
-          9 min  -> 0x88
-          35 min -> 0xD8
-          Formula: boost_byte = 0x88 + round((duration_min - 9) * 80/26)
-          Note: upper bits may contain a rolling counter set by the stick.
-          Until the encoding is fully understood, durations other than 9 min
-          should be treated as approximate.
-        """
-        # Clamp to known valid range (Rademacher UI allows 1-60 min)
-        duration_min = max(1, min(60, duration_min))
-
-        # Boost byte encoding derived from two data points:
-        # 9 min -> 0x88 (136), 35 min -> 0xD8 (216)
-        boost_byte = round(0x88 + (duration_min - 9) * 80 / 26)
-        boost_byte = max(0x00, min(0xFF, boost_byte))
-
-        f = DuoFernEncoder._frame()
-        f[0] = 0x0D
-        f[1] = 0x01
-        # 11-byte payload: 0F 29 C6 08 [boost] 0F 02 40 00 27 85
-        f[2] = 0x0F
-        f[3] = 0x29
-        f[4] = 0xC6
-        f[5] = 0x08
-        f[6] = boost_byte
-        f[7] = 0x0F
-        f[8] = 0x02
-        f[9] = 0x40
-        f[10] = 0x00
-        f[11] = 0x27
-        f[12] = 0x85
-        f[13] = 0x14  # OTA payload last byte
-        f[14] = 0x07  # frame end marker
-        f[15:18] = system_code.raw
-        f[18:21] = device_code.raw
-        return f
-
     # -- Pairing --
 
     @staticmethod
