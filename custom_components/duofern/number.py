@@ -313,6 +313,21 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         device_types=frozenset({0xE1}),
         coordinator_method="async_set_sending_interval",
     ),
+    # --- HSA: boost duration ---
+    DuoFernNumberDescription(
+        key="boostDuration",
+        translation_key="boost_duration",
+        reading_key="boostDuration",
+        name="Boost Duration",
+        native_min_value=4,
+        native_max_value=60,
+        native_step=1,
+        native_unit_of_measurement="min",
+        entity_category=EntityCategory.CONFIG,
+        icon="mdi:timer-outline",
+        device_types=frozenset({0xE1}),
+        coordinator_method="async_set_boost_duration",
+    ),
 )
 
 

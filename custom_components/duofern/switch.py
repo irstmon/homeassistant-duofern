@@ -399,6 +399,10 @@ async def async_setup_entry(
                         )
                     )
 
+        # 3. Boost switch for 0xE1 Heizkörperantrieb
+        if dev_type == 0xE1:
+            entities.append(DuoFernBoostSwitch(coordinator, device_state, hex_code))
+
     # Register this platform's unique_ids centrally so __init__.py can
     # remove stale entities from previous integration versions.
     coordinator.data.registered_unique_ids.update(
@@ -660,4 +664,64 @@ class DuoFernAutomationSwitch(
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
                 )
+        self.async_write_ha_state()
+
+
+# ===========================================================================
+# Boost Switch — 0xE1 Heizkörperantrieb
+# ===========================================================================
+
+
+class DuoFernBoostSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
+    """Boost on/off for Heizkörperantrieb (0xE1) — identical in principle to
+    manualMode / timeAutomatic: queued via _schedule_hsa_update("boostActive"),
+    sent on the next device check-in, optimistic UI update via readings.
+
+    boostActive is stored in readings["boostActive"] ("on"/"off") and mirrored
+    to ParsedStatus.boost_active by parse_status(). Reading it back from
+    readings keeps this entity consistent with all other HSA switches.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "boost"
+    _attr_icon = "mdi:radiator"
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_state: DuoFernDeviceState,
+        hex_code: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._hex_code = hex_code
+        self._device_code = device_state.device_code
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+
+    @property
+    def _device_state(self) -> DuoFernDeviceState | None:
+        if self.coordinator.data is None:
+            return None
+        return self.coordinator.data.devices.get(self._hex_code)
+
+    @property
+    def available(self) -> bool:
+        state = self._device_state
+        return state is not None and state.available
+
+    @property
+    def is_on(self) -> bool | None:
+        state = self._device_state
+        if state is None:
+            return None
+        return state.status.readings.get("boostActive") == "on"
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_boost(self._device_code, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_boost(self._device_code, False)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()

@@ -1272,6 +1272,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             "max": 28,
             "step": 0.5,
         },
+        # Boost — encoded in f[8]/f[11] of the duoSetHSA frame, NOT in set_value bits.
+        # boost_byte=True tells _send_hsa_if_pending to route these to build_hsa_command
+        # as boost_duration_min rather than ORing them into set_value.
+        # boostActive:   "on"/"off"  — activates/deactivates boost
+        # boostDuration: 4-60 (int) — duration in minutes, reported back by device
+        "boostActive": {"boost_byte": True},
+        "boostDuration": {"boost_byte": True, "min": 0, "max": 60, "step": 1},
     }
 
     def _schedule_hsa_update(
@@ -1344,10 +1351,23 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         set_value = 0
         pending = dict(state.hsa_pending)  # snapshot
 
+        # Separate boost keys from normal set_value keys.
+        # boost_byte keys go into f[8]/f[11] of the frame, not into set_value.
+        boost_active_val: str | None = None
+        boost_duration_val: int | None = None
+
         for key, (old_val, new_val) in pending.items():
             cmd = self._HSA_COMMANDS.get(key)
             if cmd is None:
                 _LOGGER.warning("_send_hsa_if_pending: unknown HSA key %s", key)
+                continue
+
+            if cmd.get("boost_byte"):
+                # Collect boost values — sent as a separate frame below
+                if key == "boostActive":
+                    boost_active_val = str(new_val)
+                elif key == "boostDuration":
+                    boost_duration_val = int(float(new_val))
                 continue
 
             # What does the DEVICE currently report for this key?
@@ -1383,7 +1403,36 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # HSAtimer always 0 from HA (we don't support timed temp changes)
         # set_value |= (0 << 16)
 
-        # Only send if there's something to do (mirrors FHEM forceResponse check)
+        # Send boost frame if either boost key is pending.
+        # boostActive "on" + boostDuration together activate boost.
+        # boostActive "off" alone deactivates (duration irrelevant → 0).
+        if boost_active_val is not None or boost_duration_val is not None:
+            active = (
+                boost_active_val in ("on", "True", "1", "true")
+                if boost_active_val is not None
+                else (
+                    state.status.boost_active  # if only duration changed, keep current active state
+                )
+            )
+            # Use pending duration if provided, else current reading
+            if boost_duration_val is not None:
+                dur = boost_duration_val
+            else:
+                dur = int(device_readings.get("boostDuration", 30))
+            boost_frame = DuoFernEncoder.build_hsa_command(
+                set_value=0,
+                device_code=device_code,
+                boost_duration_min=dur if active else 0,
+            )
+            await self._stick.send_command(boost_frame)
+            _LOGGER.info(
+                "Sent boost %s to %s (duration=%d min)",
+                "ON" if active else "OFF",
+                device_code.hex,
+                dur if active else 0,
+            )
+
+        # Only send setValue frame if there's something to do (mirrors FHEM forceResponse)
         force_response = state.status.readings.get("forceResponse", 0)
         if set_value + int(force_response or 0) > 0:
             frame = DuoFernEncoder.build_hsa_command(set_value, device_code)
@@ -1392,7 +1441,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 "Sent duoSetHSA to %s: setValue=0x%06X (keys: %s)",
                 device_code.hex,
                 set_value,
-                list(pending.keys()),
+                [
+                    k
+                    for k in pending
+                    if not self._HSA_COMMANDS.get(k, {}).get("boost_byte")
+                ],
             )
 
         # Clear pending regardless (mirrors FHEM delete HSAold)
@@ -1421,6 +1474,33 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         clamped = max(2, min(60, value))  # UI min=2, never send 0 or 1
         self._schedule_hsa_update(device_code, "sendingInterval", clamped)
+
+    async def async_set_boost(self, device_code: DuoFernId, enable: bool) -> None:
+        """Queue boost activation/deactivation for the next HSA status frame.
+
+        Mirrors async_set_automation() for boolean HSA keys.
+        boostActive is encoded in f[8]/f[11], not in set_value bits —
+        _send_hsa_if_pending handles the routing via boost_byte=True.
+
+        Also tracks boost_start timestamp on activation (optimistic).
+        """
+        self._schedule_hsa_update(device_code, "boostActive", "on" if enable else "off")
+        if enable:
+            state = self.data.devices.get(device_code.hex)
+            if state is not None:
+                state.boost_start = datetime.now()
+
+    async def async_set_boost_duration(
+        self, device_code: DuoFernId, value: int
+    ) -> None:
+        """Queue boostDuration change for the next HSA status frame.
+
+        Mirrors async_set_sending_interval() exactly.
+        boostDuration is encoded in f[8] bits 5-0, not in set_value —
+        _send_hsa_if_pending handles the routing via boost_byte=True.
+        """
+        clamped = max(4, min(60, value))
+        self._schedule_hsa_update(device_code, "boostDuration", clamped)
 
     async def async_set_mode_change(self, device_code: DuoFernId) -> None:
         """Toggle mode change for switch actors / dimmers.

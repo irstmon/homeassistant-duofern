@@ -189,25 +189,10 @@ async def async_setup_entry(
                 )
             )
 
-        # Boost sensors for 0xE1 Heizkörperantrieb:
-        #   1. Binary sensor: boost aktiv (on/off)
-        #   2. Sensor: Boost-Dauer in Minuten (zuletzt gesetzt)
-        #   3. Sensor: Boost-Startzeitpunkt (Timestamp)
+        # Boost sensor for 0xE1: only the start-timestamp (DIAGNOSTIC).
+        # boost on/off → switch entity (boostActive reading)
+        # boost duration → number entity (boostDuration reading)
         if dev_code.device_type == 0xE1:
-            entities.append(
-                DuoFernBoostActiveSensor(
-                    coordinator=coordinator,
-                    device_state=device_state,
-                    hex_code=hex_code,
-                )
-            )
-            entities.append(
-                DuoFernBoostDurationSensor(
-                    coordinator=coordinator,
-                    device_state=device_state,
-                    hex_code=hex_code,
-                )
-            )
             entities.append(
                 DuoFernBoostStartSensor(
                     coordinator=coordinator,
