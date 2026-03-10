@@ -107,6 +107,25 @@ class DuoFernDeviceState:
     # Not reset when boost ends so the UI can show "last boost started at X".
     boost_start: datetime | None = None
 
+    # When a boost ON/OFF frame is sent, the intended value ("on"/"off") is saved
+    # here so it can be re-queued if the device responds with an unexpected ACK
+    # (e.g. 810100BB — command received but rejected).  Cleared on CC (810003CC).
+    boost_retry_pending: str | None = None
+
+    # Set to True after a boost OFF command is accepted (CC).
+    # While True, incoming status frames that still show boost active (F0) must
+    # NOT overwrite readings["boostActive"] back to "on" — the device takes a
+    # moment to process the command and the STATUS_RETRY_COUNT requests may
+    # arrive before the device has actually stopped boosting.
+    # Cleared when the device sends its first non-boost status frame (F0=False).
+    boost_deactivating: bool = False
+
+    # User's intended boost duration as set via the slider (number entity).
+    # NOT sent to the device immediately — only read when boost is activated.
+    # This prevents the slider from triggering a duoSetHSA frame on every change.
+    # Initialised to 14 min (reasonable default); preserved across status frames.
+    pending_boost_duration: int = 14
+
 
 @dataclass
 class DuoFernData:
@@ -323,6 +342,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             self._handle_not_initialized()
             return
 
+        # Unknown 0x81 response (e.g. 810100BB — command received but rejected).
+        # The stick still unblocks the send queue on any 0x81 frame, but the
+        # coordinator never gets a CC so status retries don't fire and the
+        # pending command is silently lost.  Re-queue any saved boost retry.
+        if frame[0] == 0x81:
+            self._handle_unknown_ack(frame)
+            return
+
         # Pair/unpair responses
         if DuoFernDecoder.is_pair_response(frame):
             self._handle_pair_response(frame)
@@ -383,9 +410,69 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # compares parsed against itself and never fires correctly.
             prev_boost_active = state.status.boost_active
 
+            # During boost the device reports desired-temp=28°C in every frame.
+            # Preserve the real user setpoint so ClimateEntity and the UI don't
+            # show 28°C permanently.  We restore it below after state.status = parsed.
+            prev_desired_temp = state.status.desired_temp
+            prev_desired_temp_reading = state.status.readings.get("desired-temp")
+
             state.status = parsed
             state.available = True
             state.last_seen = datetime.now().isoformat(timespec="seconds")
+
+            # Fix: during boost, device reports desired-temp=28°C.
+            # Restore the real setpoint so HA shows the correct value.
+            # Also restore on the boost→off transition frame: the first status
+            # frame after boost ends (either by timer or OFF command) may still
+            # report 28°C before the device settles on the real setpoint.
+            if parsed.boost_active and prev_desired_temp is not None:
+                # Boost still active: always restore our stored setpoint
+                state.status.desired_temp = prev_desired_temp
+                if prev_desired_temp_reading is not None:
+                    state.status.readings["desired-temp"] = prev_desired_temp_reading
+            elif (
+                not parsed.boost_active
+                and prev_boost_active
+                and prev_desired_temp is not None
+            ):
+                # Boost just ended (True→False transition): restore for this frame.
+                state.status.desired_temp = prev_desired_temp
+                if prev_desired_temp_reading is not None:
+                    state.status.readings["desired-temp"] = prev_desired_temp_reading
+
+            # Fix: while boost_deactivating=True, the device may still report F0
+            # (boost active) for several frames before processing our OFF command.
+            # The device accepts the packet (CC) but continues boosting — it needs
+            # to be asked again on each status frame until it complies.
+            # Suppress F0 updates to readings["boostActive"] and re-queue the OFF
+            # so _send_hsa_if_pending fires again on this frame contact.
+            if state.boost_deactivating:
+                if parsed.boost_active:
+                    # Device still in boost — hold "off" in the UI and re-send
+                    state.status.readings["boostActive"] = "off"
+                    _LOGGER.debug(
+                        "HSA %s: boost_deactivating=True on F0 frame — re-queuing OFF",
+                        hex_code,
+                    )
+                    # Re-queue: _send_hsa_if_pending will fire below because hsa_pending becomes non-empty.
+                    # Do NOT call _schedule_hsa_update (it would call async_set_updated_data unnecessarily);
+                    # directly insert into hsa_pending so the pending check below sends the OFF.
+                    if "boostActive" not in state.hsa_pending:
+                        state.hsa_pending["boostActive"] = ("on", "off")
+                else:
+                    # Device confirmed boost is off — clear the flag
+                    state.boost_deactivating = False
+                    _LOGGER.debug(
+                        "HSA %s: boost confirmed off by device, clearing boost_deactivating",
+                        hex_code,
+                    )
+
+            # Fix: device frame always overwrites boostDuration with the last-used
+            # value (stays at e.g. 14 after boost ends).  When boost is NOT active
+            # and no boost keys are currently pending, restore the slider value
+            # so the UI doesn't snap back to the old duration.
+            if not parsed.boost_active and "boostDuration" not in state.hsa_pending:
+                state.status.readings["boostDuration"] = state.pending_boost_duration
 
             # Fire obstacle/block events for automation triggers (e.g. SX5 garage)
             self._fire_obstacle_events(hex_code, parsed)
@@ -562,6 +649,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.debug("Command ACK from %s", device_code.hex)
+        # Clear pending retry — command was accepted by the device (CC)
+        state = self.data.devices.get(device_code.hex)
+        if state:
+            state.boost_retry_pending = None
         for _ in range(STATUS_RETRY_COUNT):
             asyncio.create_task(self._send_status_request(device_code))
 
@@ -584,6 +675,39 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         _LOGGER.warning("Stick reports NOT INITIALIZED — scheduling reconnect")
         asyncio.create_task(self._reconnect())
+
+    def _handle_unknown_ack(self, frame: bytearray) -> None:
+        """Handle unexpected 0x81 response that is not CC / AA / 55.
+
+        Known case: 810100BB — device received the command but rejected it.
+        The stick's ack_event fires (unblocking the send queue) but the
+        coordinator's normal CC path never runs, so no status retry happens
+        and any pending retry is lost.
+
+        Strategy: re-queue boost_retry_pending (saved before hsa_pending.clear)
+        so the command is retried on the next device-initiated status frame.
+        Also schedule status retries so we get the current device state.
+        """
+        device_code = DuoFernDecoder.extract_device_code(frame)
+        _LOGGER.warning(
+            "Unexpected 0x81 response 0x%02X from %s — command may have been rejected",
+            frame[3],
+            device_code.hex,
+        )
+        state = self.data.devices.get(device_code.hex)
+        if state and state.boost_retry_pending is not None:
+            retry_val = state.boost_retry_pending
+            state.boost_retry_pending = None
+            _LOGGER.info(
+                "Re-queuing boostActive=%s for %s after rejected command (0x%02X)",
+                retry_val,
+                device_code.hex,
+                frame[3],
+            )
+            self._schedule_hsa_update(device_code, "boostActive", retry_val)
+        # Schedule status retries to get current device state
+        for _ in range(STATUS_RETRY_COUNT):
+            asyncio.create_task(self._send_status_request(device_code))
 
     def _handle_pair_response(self, frame: bytearray) -> None:
         """#Device paired (0602...)."""
@@ -1419,22 +1543,59 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 dur = boost_duration_val
             else:
                 dur = int(device_readings.get("boostDuration", 30))
+
+            # Boost ON: encode current desired-temp in set_value so the device
+            # doesn't reject the frame when the setpoint was changed externally.
+            # Encoding: bitFrom=17, changeFlag=23, min=4, max=28, step=0.5
+            #
+            # Boost OFF: set_value=0x000000. Verified from Homepilot OTA capture.
+            if active:
+                try:
+                    current_temp = float(
+                        device_readings.get(
+                            "desired-temp",
+                            state.status.desired_temp
+                            if state.status.desired_temp is not None
+                            else 20.0,
+                        )
+                    )
+                except (TypeError, ValueError):
+                    current_temp = 20.0
+                current_temp = max(4.0, min(28.0, current_temp))
+                desired_raw = max(0, min(63, int((current_temp - 4.0) / 0.5)))
+                boost_set_value = (desired_raw << 17) | (1 << 23)
+            else:
+                boost_set_value = 0
+
             boost_frame = DuoFernEncoder.build_hsa_command(
-                set_value=0,
+                set_value=boost_set_value,
                 device_code=device_code,
                 boost_duration_min=dur if active else 0,
+                boost_off=not active,
             )
             await self._stick.send_command(boost_frame)
-            _LOGGER.info(
-                "Sent boost %s to %s (duration=%d min)",
-                "ON" if active else "OFF",
-                device_code.hex,
-                dur if active else 0,
-            )
+            if active:
+                _LOGGER.info(
+                    "Sent boost ON to %s (duration=%d min)",
+                    device_code.hex,
+                    dur,
+                )
+            else:
+                _LOGGER.info(
+                    "Sent boost OFF to %s",
+                    device_code.hex,
+                )
 
-        # Only send setValue frame if there's something to do (mirrors FHEM forceResponse)
+        # Send normal HSA frame only if there are non-boost pending keys (set_value > 0),
+        # OR if the device requested forceResponse AND no boost frame was sent.
+        #
+        # IMPORTANT: when a boost frame was sent, do NOT send an additional empty
+        # frame even if forceResponse > 0.  The Homepilot always sends exactly one
+        # frame per device contact.  Sending a second frame with set_value=0 causes
+        # the device to flicker on the display and may reset the setpoint.
+        sent_boost = boost_active_val is not None or boost_duration_val is not None
         force_response = state.status.readings.get("forceResponse", 0)
-        if set_value + int(force_response or 0) > 0:
+        if set_value > 0 or (int(force_response or 0) > 0 and not sent_boost):
             frame = DuoFernEncoder.build_hsa_command(set_value, device_code)
             await self._stick.send_command(frame)
             _LOGGER.info(
@@ -1447,6 +1608,18 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     if not self._HSA_COMMANDS.get(k, {}).get("boost_byte")
                 ],
             )
+
+        # Save the boost intent for retry in case the device responds with BB.
+        # Cleared on successful CC in _handle_cmd_ack.
+        if boost_active_val is not None:
+            state.boost_retry_pending = boost_active_val  # "on" or "off"
+            if not active:
+                # Mark that we're waiting for the device to confirm boost is off.
+                state.boost_deactivating = True
+            else:
+                # Boost ON overrides any pending deactivation — clear the flag so
+                # incoming F0 frames don't immediately re-queue a boost OFF.
+                state.boost_deactivating = False
 
         # Clear pending regardless (mirrors FHEM delete HSAold)
         state.hsa_pending.clear()
@@ -1478,29 +1651,48 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     async def async_set_boost(self, device_code: DuoFernId, enable: bool) -> None:
         """Queue boost activation/deactivation for the next HSA status frame.
 
-        Mirrors async_set_automation() for boolean HSA keys.
-        boostActive is encoded in f[8]/f[11], not in set_value bits —
-        _send_hsa_if_pending handles the routing via boost_byte=True.
-
-        Also tracks boost_start timestamp on activation (optimistic).
+        ON:  reads pending_boost_duration (set by slider) and queues both
+             boostDuration + boostActive together.  The slider itself never
+             triggers a duoSetHSA — only this method does.
+        OFF: queues boostActive=off only (duration irrelevant for deactivation).
         """
-        self._schedule_hsa_update(device_code, "boostActive", "on" if enable else "off")
         if enable:
             state = self.data.devices.get(device_code.hex)
+            # Read the duration the user configured via the slider.
+            # Falls back to 14 min if no state is found.
+            duration = state.pending_boost_duration if state is not None else 14
+            # Queue duration first so it is available when _send_hsa_if_pending
+            # processes boostActive in the same pending batch.
+            self._schedule_hsa_update(device_code, "boostDuration", duration)
+            self._schedule_hsa_update(device_code, "boostActive", "on")
             if state is not None:
                 state.boost_start = datetime.now()
+        else:
+            self._schedule_hsa_update(device_code, "boostActive", "off")
 
     async def async_set_boost_duration(
         self, device_code: DuoFernId, value: int
     ) -> None:
-        """Queue boostDuration change for the next HSA status frame.
+        """Store the desired boost duration from the slider — NO HSA frame sent.
 
-        Mirrors async_set_sending_interval() exactly.
-        boostDuration is encoded in f[8] bits 5-0, not in set_value —
-        _send_hsa_if_pending handles the routing via boost_byte=True.
+        The duration is kept in state.pending_boost_duration and only
+        transmitted to the device when async_set_boost(enable=True) is called.
+        Moving the slider must never cause a duoSetHSA to be queued or sent.
         """
         clamped = max(4, min(60, value))
-        self._schedule_hsa_update(device_code, "boostDuration", clamped)
+        state = self.data.devices.get(device_code.hex)
+        if state is None:
+            return
+        state.pending_boost_duration = clamped
+        # Optimistic UI update: slider shows the new value immediately
+        # without waiting for the next status frame.
+        state.status.readings["boostDuration"] = clamped
+        self.async_set_updated_data(self.data)
+        _LOGGER.debug(
+            "HSA %s: boostDuration set locally to %d min (no HSA sent)",
+            device_code.hex,
+            clamped,
+        )
 
     async def async_set_mode_change(self, device_code: DuoFernId) -> None:
         """Toggle mode change for switch actors / dimmers.

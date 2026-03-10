@@ -127,6 +127,11 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 - **Valve Position sensor** — dedicated sensor entity (0–100 %) for the Heizkörperantrieb (`0xE1`), visible on the device card
 - **Battery sensor** — dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
 - **Window Open switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C)
+- **Boost Mode** — rapidly heats a room by fully opening the valve for a configurable duration:
+  - **Boost switch** — activates / deactivates boost mode
+  - **Boost Duration number** (4–60 min) — configure the duration before activating; moving the slider alone sends nothing to the device
+  - **Boost Started sensor** (timestamp) — shows when the last boost was activated, rendered by HA as "13 minutes ago"; persists across restarts
+  - **Boost Started** diagnostic sensors — read-only status entities reflecting when the last boost started frame was recieved from the device
 
 ### Binary Sensor Entities (Motion, Smoke, Contact)
 
@@ -380,6 +385,20 @@ python3 tools/pair_duofern.py pair --timeout 120 -v  # Extended timeout + debug
 - **ACK-gated send queue**: One command in-flight at a time, 5-second timeout
 - **Push-based updates**: Devices send status frames proactively; coordinator calls `async_set_updated_data()` on each received frame
 - **Position convention**: DuoFern 0 = open / 100 = closed; HA 0 = closed / 100 = open (inverted transparently)
+- **HSA (Heizkörperantrieb)**: Device-initiated bidirectional protocol — changes are queued and transmitted only when the device checks in with a status frame, matching FHEM's `%commandsHSA` / `HSAold` implementation
+- **Boost frame layout** (OTA-verified via rtl_433):
+  - ON: `f[8] = 0x40 | duration_min`, `f[11] = 0x03`
+  - OFF: `f[8] = 0x00`, `f[11] = 0x02` (critical — `0x00` is silently ignored by the device)
+
+#### Sniffing DuoFern Radio Frames (rtl_433)
+
+To capture raw OTA frames with an RTL-SDR dongle (thanks a lot to gluap from pyduofern-hacs for writing down his command and pointing me to it):
+
+```bash
+rtl_433 -s 2.0M -f 434.5M -g 30 \
+  -X "n=duofern,m=FSK_MC_ZEROBIT,s=10,r=100,preamble={10}fd4,invert" \
+  -S known
+```
 
 Implementation based on `10_DUOFERNSTICK.pm` and `30_DUOFERN.pm` from the FHEM project.
 

@@ -629,6 +629,7 @@ class DuoFernEncoder:
         set_value: int,
         device_code: "DuoFernId",
         boost_duration_min: int = 0,
+        boost_off: bool = False,
     ) -> bytearray:
         """Build duoSetHSA command for Heizkörperantrieb (0xE1).
 
@@ -662,15 +663,19 @@ class DuoFernEncoder:
         # bytes 7-17 = 0x00 (duoSetHSA has no system_code field)
         # From FHEM: "0D011D80nnnnnn0000000000000000000000yyyyyy00"
         #              bytes 15-17 are 0x00, NOT system code!
-        # Boost bytes: only non-zero when activating boost.
-        # f[8] = 0x40 | minutes  (bit6=active-flag, bits5-0=duration 4-60)
-        # f[11] = 0x03
-        # Deactivation leaves f[8] and f[11] at 0x00 (bytearray default).
-        # Verified OTA: 22min→0x56, 46min→0x6E, 56min→0x78
+        # Boost bytes — OTA-verified (Homepilot capture, radio payload byte[1:] maps
+        # 1:1 to USB stick payload byte[1:], only the first byte differs 0x11 vs 0x0D):
+        #   Boost ON:  f[8] = 0x40 | duration_min  (bit6=active, bits5-0=minutes 4-60)
+        #              f[11] = 0x03
+        #   Boost OFF: f[8] = 0x00
+        #              f[11] = 0x02  ← confirmed from Homepilot OTA capture
+        # Verified OTA: Boost ON 22min→f[8]=0x56, 46min→0x6E, 56min→0x78.
         if boost_duration_min > 0:
             clamped = max(4, min(60, boost_duration_min))
             f[8] = 0x40 | (clamped & 0x3F)
             f[11] = 0x03
+        elif boost_off:
+            f[11] = 0x02
         f[18:21] = device_code.raw
         f[21] = 0x00
         return f
