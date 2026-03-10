@@ -87,6 +87,9 @@
       "remote_unpair": {
         "name": "Fernabmelden"
       },
+      "remote_stop": {
+        "name": "Fernanmelden/-abmelden stoppen"
+      },
       "temp_up": {
         "name": "Temperatur erhöhen"
       },
@@ -220,7 +223,7 @@
       "window_contact_automatic": {
         "name": "Fenster offen"
       },
-      "boost_active": {
+      "boost": {
         "name": "Boost"
       }
     },

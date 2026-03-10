@@ -87,6 +87,9 @@
       "remote_unpair": {
         "name": "Remote Unpair"
       },
+      "remote_stop": {
+        "name": "Stop Remote (Un)Pairing"
+      },
       "temp_up": {
         "name": "Temp Up"
       },

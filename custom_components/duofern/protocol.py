@@ -741,6 +741,22 @@ class DuoFernEncoder:
         f[18:21] = device_code.raw
         return f
 
+    @staticmethod
+    def build_remote_stop(device_code: DuoFernId) -> bytearray:
+        """Stop remote pairing/unpairing mode on the device.
+
+        OTA-verified 2026-03-10 (capture_stop_1.txt, device 4696e9):
+          Radio frame f[2]=0x06, f[3]=0x03 (USB: 0x0D prefix, payload identical).
+        Sent after remotePair or remoteUnpair to end the pairing window early.
+        """
+        f = DuoFernEncoder._frame()
+        f[0] = 0x0D
+        f[1] = 0x01
+        f[2] = 0x06
+        f[3] = 0x03
+        f[18:21] = device_code.raw
+        return f
+
 
 # ---------------------------------------------------------------------------
 # Decoder

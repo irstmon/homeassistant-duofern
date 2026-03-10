@@ -110,6 +110,7 @@ async def async_setup_entry(
         ):
             entities.append(DuoFernRemotePairButton(coordinator, dev_code))
             entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
+            entities.append(DuoFernRemoteStopButton(coordinator, dev_code))
 
         # tempUp/tempDown only for 0x73 Raumthermostat (in %setsThermostat).
         # NOT for 0xE1 HSA — that device uses the climate entity slider via
@@ -460,6 +461,33 @@ class DuoFernRemoteUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
 
     async def async_press(self) -> None:
         await self.coordinator.async_remote_unpair(self._device_code)
+
+
+class DuoFernRemoteStopButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Stop remote pairing/unpairing mode on a device.
+
+    OTA-verified 2026-03-10: f[2]=0x06, f[3]=0x03.
+    Ends the pairing window early after a remotePair or remoteUnpair press.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "remote_stop"
+    _attr_icon = "mdi:remote-off"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(
+        self,
+        coordinator: DuoFernCoordinator,
+        device_code: DuoFernId,
+    ) -> None:
+        super().__init__(coordinator)
+        self._device_code = device_code
+        hex_code = device_code.full_hex
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_stop"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_remote_stop(self._device_code)
 
 
 # ---------------------------------------------------------------------------

@@ -1361,6 +1361,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         frame = DuoFernEncoder.build_remote_unpair(device_code)
         await self._stick.send_command(frame)
 
+    async def async_remote_stop(self, device_code: DuoFernId) -> None:
+        """Stop remote pairing/unpairing mode on the device.
+
+        OTA-verified 2026-03-10: f[2]=0x06, f[3]=0x03.
+        Ends the pairing window early after a remotePair or remoteUnpair.
+        """
+        if self._stick is None:
+            return
+        frame = DuoFernEncoder.build_remote_stop(device_code)
+        await self._stick.send_command(frame)
+
     # ------------------------------------------------------------------
     # HSA (Heizkörperantrieb 0xE1) — device-initiated protocol
     # ------------------------------------------------------------------
