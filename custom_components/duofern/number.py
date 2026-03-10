@@ -39,6 +39,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
@@ -358,11 +359,15 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern number entities", len(entities))
 
 
-class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity):
+class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, RestoreEntity):
     """A DuoFern numeric configuration value as a NumberEntity (slider).
 
     The current value is read from device status readings.
     Setting a new value sends the corresponding command from %commands.
+    Uses RestoreEntity so battery devices (e.g. 0xE1 Heizkörperantrieb)
+    show their last known value immediately after an HA restart instead of
+    displaying 'unknown' until the first status frame arrives.
+    The restored value is display-only — it is never sent to the device.
     """
 
     entity_description: DuoFernNumberDescription
@@ -382,6 +387,20 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity):
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._restored_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known value for display until first live frame arrives."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                self._restored_value = float(last_state.state)
+            except (TypeError, ValueError):
+                pass
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -396,17 +415,18 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return current value from device status readings."""
+        """Return current value from device status readings, with restored fallback."""
         state = self._device_state
-        if state is None:
-            return None
-        val = state.status.readings.get(self.entity_description.reading_key)
-        if val is None:
-            return None
-        try:
-            return float(val)  # type: ignore[arg-type]
-        except (TypeError, ValueError):
-            return None
+        if state is not None:
+            val = state.status.readings.get(self.entity_description.reading_key)
+            if val is not None:
+                try:
+                    live = float(val)
+                    self._restored_value = live  # keep in sync for next restart
+                    return live
+                except (TypeError, ValueError):
+                    pass
+        return self._restored_value
 
     async def async_set_native_value(self, value: float) -> None:
         """Send the new value to the device."""

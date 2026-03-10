@@ -471,7 +471,9 @@ class DuoFernBatterySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernValveSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+class DuoFernValveSensor(
+    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
+):
     """Sensor showing the current valve opening position of the radiator valve.
 
     From 30_DUOFERN.pm format "29" statusId 186:
@@ -480,8 +482,8 @@ class DuoFernValveSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
 
     Shown in the "Sensoren" section of the device card (no EntityCategory so
     it appears as a primary sensor, not a diagnostic).
-    Uses SensorDeviceClass.POWER_FACTOR for % unit — HA renders a nice
-    gauge icon. Alternatively mdi:valve is a clear custom icon.
+    Uses RestoreEntity so the last known position is shown immediately after
+    an HA restart — battery devices can take minutes before their first frame.
     """
 
     _attr_has_entity_name = True
@@ -501,6 +503,20 @@ class DuoFernValveSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
         self._hex_code = hex_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_valve_position"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._restored_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known valve position for display until first live frame."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            try:
+                self._restored_value = float(last_state.state)
+            except (TypeError, ValueError):
+                pass
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -516,15 +532,16 @@ class DuoFernValveSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     @property
     def native_value(self) -> float | None:
         state = self._device_state
-        if state is None:
-            return None
-        val = state.status.readings.get("valvePosition")
-        if val is None:
-            return None
-        try:
-            return float(val)
-        except (TypeError, ValueError):
-            return None
+        if state is not None:
+            val = state.status.readings.get("valvePosition")
+            if val is not None:
+                try:
+                    live = float(val)
+                    self._restored_value = live  # keep in sync for next restart
+                    return live
+                except (TypeError, ValueError):
+                    pass
+        return self._restored_value
 
     @callback
     def _handle_coordinator_update(self) -> None:

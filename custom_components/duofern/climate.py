@@ -46,6 +46,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
@@ -93,7 +94,9 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern climate entities", len(entities))
 
 
-class DuoFernClimate(CoordinatorEntity[DuoFernCoordinator], ClimateEntity):
+class DuoFernClimate(
+    CoordinatorEntity[DuoFernCoordinator], ClimateEntity, RestoreEntity
+):
     """A DuoFern thermostat or radiator valve as a HA ClimateEntity.
 
     Supports HEAT and OFF modes:
@@ -127,6 +130,34 @@ class DuoFernClimate(CoordinatorEntity[DuoFernCoordinator], ClimateEntity):
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}"
+        # Restored values — shown in GUI until first live frame arrives.
+        # Never sent to the device; overwritten by coordinator updates.
+        self._restored_desired_temp: float | None = None
+        self._restored_measured_temp: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known temperatures so the GUI shows values immediately.
+
+        Battery devices (0xE1) can take minutes before sending their first
+        status frame. Without restore the climate card shows 'unknown' until
+        then. The restored values are display-only — nothing is ever sent to
+        the device based on them.
+        """
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+        attrs = last_state.attributes
+        try:
+            if (v := attrs.get("temperature")) is not None:
+                self._restored_desired_temp = float(v)
+        except (TypeError, ValueError):
+            pass
+        try:
+            if (v := attrs.get("current_temperature")) is not None:
+                self._restored_measured_temp = float(v)
+        except (TypeError, ValueError):
+            pass
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -145,39 +176,38 @@ class DuoFernClimate(CoordinatorEntity[DuoFernCoordinator], ClimateEntity):
     def current_temperature(self) -> float | None:
         """Return current measured temperature.
 
-        From %statusIds: id=165 (format 27) measured-temp via scaleF2,
-                         id=181 (format 29) measured-temp via scaleF4.
+        Falls back to the last restored value until the first live frame
+        arrives (relevant for battery devices that report infrequently).
         """
         state = self._device_state
-        if state is None:
-            return None
-        return state.status.measured_temp
+        if state is not None and state.status.measured_temp is not None:
+            # Keep restored value in sync for next restart
+            self._restored_measured_temp = state.status.measured_temp
+            return state.status.measured_temp
+        return self._restored_measured_temp
 
     @property
     def target_temperature(self) -> float | None:
         """Return the desired/set temperature.
 
-        From %statusIds: id=164 (format 27) desired-temp via scaleF1,
-                         id=180 (format 29) desired-temp via scaleF3.
+        Falls back to the last restored value until the first live frame
+        arrives (relevant for battery devices that report infrequently).
         """
         state = self._device_state
-        if state is None:
-            return None
-        return state.status.desired_temp
+        if state is not None and state.status.desired_temp is not None:
+            # Keep restored value in sync for next restart
+            self._restored_desired_temp = state.status.desired_temp
+            return state.status.desired_temp
+        return self._restored_desired_temp
 
     @property
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode.
 
-        From 30_DUOFERN.pm: manualMode=on means user has taken over.
-        We map manualMode=off + timeAutomatic=on -> HEAT (normal auto mode),
-        any other combination -> HEAT as well (device is always heating).
-        Only report OFF if desired-temp is at minimum (4°C).
+        Uses target_temperature (which already includes restored fallback)
+        so the mode is consistent with what the GUI shows.
         """
-        state = self._device_state
-        if state is None:
-            return HVACMode.HEAT
-        desired = state.status.desired_temp
+        desired = self.target_temperature
         if desired is not None and desired <= TEMP_MIN:
             return HVACMode.OFF
         return HVACMode.HEAT

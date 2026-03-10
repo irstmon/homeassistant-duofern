@@ -358,7 +358,7 @@ STATUS_GROUPS: Final[dict[str, list[int]]] = {
     "25": [300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313],
     "26": [],
     "27": [160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171],
-    "29": [180, 181, 182, 183, 184, 185, 186, 187, 998],
+    "29": [180, 181, 182, 183, 184, 185, 186, 187, 188, 998],
     "2B": [300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313],
 }
 
@@ -747,6 +747,16 @@ STATUS_IDS: Final[dict[int, dict]] = {
     },
     186: {"name": "valvePosition", "chan": {"01": {"position": 6, "from": 0, "to": 6}}},
     187: {"name": "forceResponse", "chan": {"01": {"position": 8, "from": 7, "to": 7}}},
+    # windowContact echo — device mirrors the last windowContact value sent via
+    # duoSetHSA back in every status frame. Verified 2026-03-10 via USB log +
+    # RTL-SDR: byte[8] bit5=0 → off, bit5=1 → on. Device updates immediately
+    # after CC ACK (no delay). pos=4 → _read_word reads byte[7..8]; bit 5 of
+    # that word sits in byte[8] bit 5 (lower byte of the 16-bit word).
+    188: {
+        "name": "windowContact",
+        "map": "onOff",
+        "chan": {"01": {"position": 4, "from": 5, "to": 5}},
+    },
     # --- Format 25 / 2B: Dimmaktor ---
     300: {"name": "level", "chan": {"01": {"position": 7, "from": 0, "to": 6}}},
     301: {
