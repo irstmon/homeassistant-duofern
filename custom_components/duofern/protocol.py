@@ -725,6 +725,22 @@ class DuoFernEncoder:
         f[18:21] = device_code.raw
         return f
 
+    @staticmethod
+    def build_remote_unpair(device_code: DuoFernId) -> bytearray:
+        """duoRemoteUnpair — direct unpairing without physical button.
+
+        From 30_DUOFERN.pm:
+          remoteUnpair => {cmd => {noArg => "06020000000000000000"}}
+        Same frame structure as build_remote_pair with f[3]=0x02.
+        """
+        f = DuoFernEncoder._frame()
+        f[0] = 0x0D
+        f[1] = 0x01
+        f[2] = 0x06
+        f[3] = 0x02
+        f[18:21] = device_code.raw
+        return f
+
 
 # ---------------------------------------------------------------------------
 # Decoder
