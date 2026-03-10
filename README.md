@@ -126,12 +126,12 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
   `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `sendingInterval`
 - **Valve Position sensor** — dedicated sensor entity (0–100 %) for the Heizkörperantrieb (`0xE1`), visible on the device card
 - **Battery sensor** — dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
-- **Window Open switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C)
+- **Window Open switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C). The switch reflects the **live device state** — the device echoes the last-set value back in every status frame
 - **Boost Mode** — rapidly heats a room by fully opening the valve for a configurable duration:
   - **Boost switch** — activates / deactivates boost mode
   - **Boost Duration number** (4–60 min) — configure the duration before activating; moving the slider alone sends nothing to the device
   - **Boost Started sensor** (timestamp) — shows when the last boost was activated, rendered by HA as "13 minutes ago"; persists across restarts
-  - **Boost Started** diagnostic sensors — read-only status entities reflecting when the last boost started frame was recieved from the device
+- **Values restored on startup** — all `0xE1` entities (climate temperatures, valve position, sending interval, boost duration) show their last known values immediately after HA restarts. Battery devices can take several minutes before their first status frame — no more `unknown` on the device card
 
 ### Binary Sensor Entities (Motion, Smoke, Contact)
 
@@ -203,6 +203,7 @@ Three buttons appear on the **DuoFern Stick device card**:
 | **Full reset** | Covers, switches, dimmers, climate | Factory reset (loses pairing) |
 | **Remote pair** | All actuators | Initiate remote pairing |
 | **Remote unpair** | All actuators | Remove remote pairing |
+| **Stop remote pairing** | All actuators | End remote pair/unpair window early |
 | **Get status** | All actuators | Request current status from this device |
 | **Temp +** / **Temp −** | Climate | Increment/decrement target temperature by one step |
 

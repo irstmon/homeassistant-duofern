@@ -1,5 +1,60 @@
 # Changelog
 
+## [v2.0.4] — 2026-03-10
+
+### Bug Fixes
+
+- **Remote Unpair button threw `AttributeError` for all device types** — `build_remote_unpair()`
+  was missing from `DuoFernEncoder` in `protocol.py`. Pressing "Remote Unpair" failed with
+  `type object 'DuoFernEncoder' has no attribute 'build_remote_unpair'` regardless of device type.
+  Fixed by implementing the method (`f[2]=0x06, f[3]=0x02`, from `30_DUOFERN.pm` `remoteUnpair`).
+
+### New Features
+
+#### Stop Remote Pairing Button
+
+A new **"Stop Remote Pairing"** button is added to all devices that have Remote Pair / Remote Unpair
+(all actuators except remotes, binary sensors, env sensors, and `0xE1`).
+
+Pressing it ends the remote pairing or unpairing window early, without waiting for the timeout.
+OTA-verified via RTL-SDR (device `4696E9`): `f[2]=0x06, f[3]=0x03`.
+
+#### Window Contact Live Status (0xE1)
+
+The `Window Open` switch for the Heizkörperantrieb (`0xE1`) now reflects the **live device state**
+instead of relying solely on `RestoreEntity`. The device echoes the last `windowContact` value
+set via `duoSetHSA` back in every status frame (Format 29, `byte[8] bit 5`).
+
+New StatusId **188**: `pos=4, bits 5–5, map=onOff`. Verified via USB log + RTL-SDR:
+`byte[8]=0x82` → off, `byte[8]=0xA2` → on. The device updates immediately after the CC ACK.
+
+`RestoreEntity` remains as a safety net for the gap between HA start and the first frame.
+
+### Improvements
+
+#### Restore Last Known Values on Startup (0xE1)
+
+Battery-powered devices like the Heizkörperantrieb can take several minutes before sending
+their first status frame. All `0xE1` entities now show their last known values immediately
+after an HA restart instead of displaying `unknown`:
+
+| Entity | What is restored |
+|--------|-----------------|
+| Climate | Target temperature + current temperature |
+| Valve Position sensor | Last position (%) |
+| Sending Interval number | Last slider value |
+| Boost Duration number | Last slider value |
+| Battery, Last Seen, Boost Started | Already restored previously ✓ |
+| manualMode, timeAutomatic, Window Open (switches) | Already restored previously ✓ |
+
+Restored values are **display-only** — nothing is sent to the device based on them.
+The first live frame from the device overwrites them.
+
+`RestoreEntity` now applies to all `DuoFernNumber` entities (not just `0xE1`) — for
+mains-powered devices this has no practical effect as live frames arrive quickly.
+
+---
+
 ## [v2.0.3] — 2026-03-10
 
 ### New Features
