@@ -219,6 +219,9 @@
       },
       "window_contact_automatic": {
         "name": "Fenster offen"
+      },
+      "boost_active": {
+        "name": "Boost"
       }
     },
     "number": {
@@ -303,6 +306,9 @@
       },
       "interval": {
         "name": "Sendeintervall"
+      },
+      "boost_duration": {
+        "name": "Boost-Dauer"
       }
     },
     "sensor": {
@@ -329,12 +335,6 @@
       },
       "valve_position": {
         "name": "Ventil-Öffnungsgrad"
-      },
-      "boost_active": {
-        "name": "Boost"
-      },
-      "boost_duration": {
-        "name": "Boost-Dauer"
       },
       "boost_started": {
         "name": "Boost gestartet"

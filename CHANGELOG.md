@@ -1,5 +1,72 @@
 # Changelog
 
+## [v2.0.3] — 2026-03-10
+
+### New Features
+
+#### Boost Mode for Heizkörperantrieb (0xE1) — Full Bidirectional Control
+
+The radiator valve now supports **Boost Mode**: the valve opens fully for a configurable
+duration to rapidly heat a room.
+
+##### New Entities
+
+Three new entities are added to all `0xE1` devices:
+
+| Entity | Type | Description |
+|--------|------|-------------|
+| **Boost** | Switch | Activates / deactivates boost mode |
+| **Boost Duration** | Number (4–60 min) | Duration to set before activating boost. Moving the slider alone does **not** send anything to the device — the value is only transmitted when the Boost switch is turned on |
+| **Boost Started** | Sensor (Timestamp) | When the current (or last) boost was started. HA renders this as "13 minutes ago". Survives restarts via RestoreEntity |
+
+##### Protocol (OTA-verified via RTl-SDR)
+
+Boost frames were reverse-engineered from live Homepilot radio captures using:
+
+```bash
+rtl_433 -s 2.0M -f 434.5M -g 30 \
+  -X "n=duofern,m=FSK_MC_ZEROBIT,s=10,r=100,preamble={10}fd4,invert" \
+  -S known
+```
+
+| Frame | `f[8]` | `f[11]` | Notes |
+|-------|--------|---------|-------|
+| Boost ON  | `0x40 \| duration_min` | `0x03` | bit 6 = active flag, bits 5–0 = minutes (4–60) |
+| Boost OFF | `0x00` | `0x02` | `f[11]=0x02` is critical — `0x00` causes the device to silently ignore the command |
+
+The Boost ON frame also encodes the current `desired-temp` in `set_value` to prevent
+the device from rejecting the command (`BB`) when the setpoint was changed externally
+(e.g. via Homepilot).
+
+##### Bug Fixes (all Boost-related)
+
+- **Slider triggered HSA frames** — moving the duration slider no longer sends a
+  `duoSetHSA` frame. Duration is stored locally and only transmitted when Boost is
+  activated.
+- **Desired temperature stuck at 28 °C** — during boost the device reports
+  `desired-temp=28°C` in every frame. The real user setpoint is now preserved and
+  restored correctly, including on the first frame after boost ends.
+- **Boost ON rejected (BB) after external setpoint change** — `set_value=0` in the
+  boost frame was accepted only if the device still held its initial setpoint. The
+  current `desired-temp` is now always encoded in `set_value`.
+- **Duration slider snapped back** — the device always reports the last-used boost
+  duration in the status frame, overwriting the slider. The slider value is now
+  preserved from `pending_boost_duration` when boost is inactive.
+- **Display flickering ("bos" / normal / "bos")** — a second empty HSA frame was
+  sent after the boost frame due to `forceResponse > 0`. Boost frames are now
+  always sent alone, matching Homepilot behaviour exactly.
+- **Boost OFF ignored** — `f[11]=0x00` caused the device to silently ignore the
+  deactivation command. Corrected to `f[11]=0x02` (OTA-verified).
+- **Boost switch jumped back to ON after OFF** — status requests sent after the
+  OFF command triggered device responses that still showed boost active. A new
+  `boost_deactivating` flag suppresses these F0 frames and re-queues the OFF
+  until the device confirms it has stopped.
+- **Rejected commands (BB) silently lost** — `0x81` frames other than CC/AA/55
+  were not handled. A new `_handle_unknown_ack()` re-queues the boost command
+  for retry on the next device contact.
+
+---
+
 ## [v2.0.2] — 2026-03-05
 
 ### New Features

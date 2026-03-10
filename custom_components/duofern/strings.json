@@ -218,7 +218,10 @@
         "name": "Back Jump"
       },
       "window_contact_automatic": {
-        "name": "Fenster offen"
+        "name": "Window open"
+      },
+      "boost": {
+        "name": "Boost"
       }
     },
     "number": {
@@ -272,6 +275,9 @@
       },
       "sending_interval": {
         "name": "Sending Interval"
+      },
+      "boost_duration": {
+        "name": "Boost Duration"
       }
     },
     "select": {
@@ -321,12 +327,6 @@
       },
       "valve_position": {
         "name": "Valve Position"
-      },
-      "boost_active": {
-        "name": "Boost"
-      },
-      "boost_duration": {
-        "name": "Boost Duration"
       },
       "boost_started": {
         "name": "Boost Started"
