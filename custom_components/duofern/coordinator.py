@@ -65,6 +65,7 @@ from .const import (
     DEVICE_CHANNELS,
     DOMAIN,
     STATUS_RETRY_COUNT,
+    STATUS_TIMEOUT,
 )
 from .protocol import (
     CoverCommand,
@@ -145,6 +146,14 @@ class DuoFernDeviceState:
     # Cleared after the first non-boost status frame is processed (without TX).
     # On the second non-boost frame the device is ready again.
     boost_off_cooldown: bool = False
+
+    # Asyncio task running the FHEM-style status-timeout loop.
+    # Started after CC for non-E1/non-cover devices; cancelled when a
+    # status frame arrives from the device.  Mirrors FHEM:
+    #   InternalTimer(+60s, DUOFERN_StatusTimeout) after CC
+    #   RemoveInternalTimer on status receipt
+    #   max STATUS_RETRY_COUNT retries, each 60 s apart
+    status_timeout_task: asyncio.Task | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -713,6 +722,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             r["wind"] = weather.wind
 
         state.last_seen = datetime.now().isoformat(timespec="seconds")
+        # FHEM: RemoveInternalTimer on status receipt — cancel pending fallback poll.
+        state = self.data.devices.get(device_code.hex)
+        if state:
+            self._cancel_status_timeout(state)
         self.async_set_updated_data(self.data)
 
     def _handle_battery_status(self, frame: bytearray) -> None:
@@ -758,12 +771,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if device_code.device_type == 0xE1:
             return
         # Cover devices send their own status frame when movement ends —
-        # no polling needed. Polling immediately after CC returns the current
-        # (pre-movement) position, which would wipe the optimistic moving state.
+        # no polling needed.
         if device_code.is_cover:
             return
-        for _ in range(STATUS_RETRY_COUNT):
-            asyncio.create_task(self._send_status_request(device_code))
+        # FHEM: InternalTimer(+60s, DUOFERN_StatusTimeout, count=4)
+        # Start a fallback timer: poll once every STATUS_TIMEOUT seconds,
+        # up to STATUS_RETRY_COUNT times, unless a status frame arrives first.
+        self._start_status_timeout(device_code)
 
     def _handle_missing_ack(self, frame: bytearray) -> None:
         """#NACK, Befehl nicht vom Aktor empfangen (810108AA).
@@ -781,8 +795,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
         if device_code.device_type == 0xE1:
             return
-        for _ in range(STATUS_RETRY_COUNT):
-            asyncio.create_task(self._send_status_request(device_code))
+        self._start_status_timeout(device_code)
 
     def _handle_not_initialized(self) -> None:
         """#NACK, Aktor nicht initialisiert (81010C55).
@@ -859,8 +872,60 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             self._schedule_hsa_update(device_code, "boostActive", retry_val)
         if device_code.device_type == 0xE1:
             return
-        for _ in range(STATUS_RETRY_COUNT):
-            asyncio.create_task(self._send_status_request(device_code))
+        self._start_status_timeout(device_code)
+
+    def _start_status_timeout(self, device_code: DuoFernId) -> None:
+        """Start the FHEM-style fallback status-poll timer after CC/AA/BB.
+
+        From 30_DUOFERN.pm (ACK handler, non-E1):
+          InternalTimer(gettimeofday()+timeout, "DUOFERN_StatusTimeout", hash)
+          hash->{helper}{timeout}{count} = STATUS_RETRY_COUNT  (4)
+          hash->{helper}{timeout}{t}     = AttrVal(name,"timeout","60")
+
+        Polls the device once every STATUS_TIMEOUT seconds, up to
+        STATUS_RETRY_COUNT times, stopping early when a status frame
+        arrives (_cancel_status_timeout is called from _handle_status).
+        """
+        state = self.data.devices.get(device_code.hex)
+        if state is None:
+            return
+        self._cancel_status_timeout(state)
+        state.status_timeout_task = asyncio.create_task(
+            self._status_timeout_loop(device_code)
+        )
+
+    def _cancel_status_timeout(self, state: "DuoFernDeviceState") -> None:
+        """Cancel any running status-timeout loop for this device.
+
+        Called from _handle_status when a status frame arrives — mirrors
+        FHEM's RemoveInternalTimer / delete helper->{timeout}.
+        """
+        if state.status_timeout_task and not state.status_timeout_task.done():
+            state.status_timeout_task.cancel()
+        state.status_timeout_task = None
+
+    async def _status_timeout_loop(self, device_code: DuoFernId) -> None:
+        """Fallback poll loop — runs until status received or retries exhausted.
+
+        Mirrors DUOFERN_StatusTimeout in 30_DUOFERN.pm:
+          wait STATUS_TIMEOUT seconds, send one status request,
+          decrement count, schedule next timer if count > 0.
+        """
+        try:
+            for attempt in range(1, STATUS_RETRY_COUNT + 1):
+                await asyncio.sleep(STATUS_TIMEOUT)
+                _LOGGER.debug(
+                    "Status timeout poll %d/%d for %s",
+                    attempt,
+                    STATUS_RETRY_COUNT,
+                    device_code.hex,
+                )
+                await self._send_status_request(device_code)
+        except asyncio.CancelledError:
+            _LOGGER.debug(
+                "Status timeout cancelled for %s (status frame received)",
+                device_code.hex,
+            )
 
     async def _send_stick_unfreeze(self, device_code: DuoFernId) -> None:
         """Send a dummy TX to unfreeze the stick after BB for 0xE1.
