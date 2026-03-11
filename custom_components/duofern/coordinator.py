@@ -757,6 +757,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             state.boost_retry_pending = None
         if device_code.device_type == 0xE1:
             return
+        # Cover devices send their own status frame when movement ends —
+        # no polling needed. Polling immediately after CC returns the current
+        # (pre-movement) position, which would wipe the optimistic moving state.
+        if device_code.is_cover:
+            return
         for _ in range(STATUS_RETRY_COUNT):
             asyncio.create_task(self._send_status_request(device_code))
 
