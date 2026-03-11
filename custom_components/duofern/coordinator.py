@@ -1692,7 +1692,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
             # changeFlag=1 if device value matches what it was when user set,
             # meaning the device hasn't changed independently — safe to apply.
-            # windowContact is never in status frame → always changeFlag=1.
             if key == "windowContact" or str(old_val) == str(is_value):
                 change_flag = 1
             else:
