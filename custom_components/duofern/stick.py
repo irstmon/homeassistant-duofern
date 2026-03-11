@@ -362,7 +362,15 @@ class DuoFernStick:
         # Step 2: Release send queue on ACK
         if is_ack:
             self._ack_event.set()
-            return  # ACKs are never dispatched to the coordinator
+            # Dispatch CC/AA/BB to coordinator so _handle_cmd_ack,
+            # _handle_missing_ack, _handle_unknown_ack actually run.
+            # Previously all 0x81 frames were silently dropped here.
+            if DuoFernDecoder.should_dispatch_ack(frame):
+                try:
+                    self._message_callback(frame)
+                except Exception:
+                    _LOGGER.exception("Error in message callback for %s", hex_str)
+            return  # ACKs never go through the normal dispatch path below
 
         # Step 3: Dispatch to coordinator (excludes broadcast ack 0FFF11...)
         if DuoFernDecoder.should_dispatch(frame):

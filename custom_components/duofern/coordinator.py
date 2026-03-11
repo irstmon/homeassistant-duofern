@@ -126,6 +126,26 @@ class DuoFernDeviceState:
     # Initialised to 14 min (reasonable default); preserved across status frames.
     pending_boost_duration: int = 14
 
+    # --- Boost receive-window guards (Bug_9 / Bug_10) ---
+    #
+    # The device only opens its receive window at the SECOND or later F0 frame
+    # after a Boost-ON command.  The very first F0 (sent ~sendInterval seconds
+    # after the CC) has no window — sending Boost OFF then results in BB/AA.
+    #
+    # boost_ha_on_pending_f0: True after we sent a Boost ON command (CC received).
+    # Cleared on the first F0 frame we see (that F0 is skipped for TX).
+    # On subsequent F0 frames boost OFF is sent normally.
+    boost_ha_on_pending_f0: bool = False
+
+    # Similarly, after Boost OFF is accepted (CC), the device needs one full
+    # D-frame cycle before it can accept a new Boost ON.  The first D-frame
+    # after a Boost-OFF CC has no window (Boost ON results in BB).
+    #
+    # boost_off_cooldown: True after CC on Boost OFF.
+    # Cleared after the first non-boost status frame is processed (without TX).
+    # On the second non-boost frame the device is ready again.
+    boost_off_cooldown: bool = False
+
 
 @dataclass
 class DuoFernData:
@@ -460,8 +480,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     if "boostActive" not in state.hsa_pending:
                         state.hsa_pending["boostActive"] = ("on", "off")
                 else:
-                    # Device confirmed boost is off — clear the flag
+                    # Device confirmed boost is off — clear the flag.
+                    # Guard B: the first D-frame after boost ends has no receive
+                    # window (Bug_11). Set cooldown so the next Boost ON is sent
+                    # on the SECOND D-frame, when the device is awake again.
                     state.boost_deactivating = False
+                    state.boost_off_cooldown = True
+                    state.boost_ha_on_pending_f0 = False
                     _LOGGER.debug(
                         "HSA %s: boost confirmed off by device, clearing boost_deactivating",
                         hex_code,
@@ -485,15 +510,79 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # overwrite our optimistic update and the UI snaps back.
             if device_code.device_type == 0xE1:
                 # Track boost start time: fires only on the False→True transition.
-                # Uses prev_boost_active (captured before state.status was replaced)
-                # so the rising edge is correctly detected on every boost start.
                 if parsed.boost_active and not prev_boost_active:
                     state.boost_start = datetime.now()
 
-                if state.hsa_pending:
-                    # Snapshot device readings BEFORE re-applying pending values.
-                    # _send_hsa_if_pending needs the real device values for the
-                    # changeFlag comparison (FHEM: $isValue = $statusValue{$key}).
+                # HSA-Antwort — OTA-Regel aus bug_boost_5 + bug_boost_6:
+                #
+                #   D3/D4/D5/E0 (boost inaktiv):
+                #     → Senden wenn etwas pending (Boost ON, desired-temp, etc.)
+                #
+                #   F0 (boost aktiv, kein OFF pending):
+                #     → NICHT senden.
+                #
+                #   F0 (boost aktiv, boost OFF pending):
+                #     → SOFORT senden — aber nur wenn Empfangsfenster offen!
+                #
+                # RECEIVE-WINDOW GUARDS (Bug_9 / Bug_10):
+                #
+                #   Guard A — erstes F0 nach HA-initiiertem Boost ON:
+                #     Das Gerät öffnet sein Empfangsfenster erst beim ZWEITEN F0
+                #     nach einem CC auf Boost ON. Das erste F0 (~sendInterval sek
+                #     nach CC) hat kein Fenster → Boost OFF jetzt → BB/AA.
+                #     Fix: boost_ha_on_pending_f0=True nach CC. Auf dem ersten F0
+                #     das Flag löschen ohne TX. Ab dem zweiten F0 normal senden.
+                #     Evidence: bug_9 (18s=1×sendInterval → BB),
+                #               bug_10 (31s=2×sendInterval → CC).
+                #
+                #   Guard B — erstes D-Frame nach Boost OFF CC:
+                #     Analog: nach CC auf Boost OFF schläft das Gerät direkt nach
+                #     dem TX wieder ein. Der erste D-Frame danach hat kein Fenster
+                #     → Boost ON jetzt → BB.
+                #     Fix: boost_off_cooldown=True nach CC auf Boost OFF.
+                #     Auf dem ersten D-Frame das Flag löschen ohne TX.
+                #     Ab dem zweiten D-Frame normal senden.
+                #     Evidence: bug_10 (D1 17s nach Boost-OFF CC → BB).
+
+                boost_off_now_pending = state.boost_deactivating or (
+                    "boostActive" in state.hsa_pending
+                    and state.hsa_pending["boostActive"][1]
+                    in ("off", "False", "0", "false")
+                )
+
+                if parsed.boost_active:
+                    # F0 frame
+                    if state.boost_ha_on_pending_f0 and not boost_off_now_pending:
+                        # Guard A: first F0 after our Boost ON — no receive window yet.
+                        # Skip TX, clear the guard so the NEXT F0 is handled normally.
+                        # Exception: if Boost OFF is already pending, send immediately
+                        # (user cancelled quickly) — risk BB, but BB-retry handles it.
+                        state.boost_ha_on_pending_f0 = False
+                        _LOGGER.debug(
+                            "HSA %s: skipping first F0 after Boost ON (no receive window)",
+                            hex_code,
+                        )
+                        should_send = False
+                    else:
+                        if state.boost_ha_on_pending_f0:
+                            # boost_off IS pending — clear guard and send now
+                            state.boost_ha_on_pending_f0 = False
+                        should_send = boost_off_now_pending
+                else:
+                    # D/E0 frame
+                    if state.boost_off_cooldown:
+                        # Guard B: first D-frame after Boost OFF CC — no receive window.
+                        # Skip TX, clear the guard so the NEXT D-frame is handled normally.
+                        state.boost_off_cooldown = False
+                        _LOGGER.debug(
+                            "HSA %s: skipping first D-frame after Boost OFF (cooldown)",
+                            hex_code,
+                        )
+                        should_send = False
+                    else:
+                        should_send = True
+
+                if should_send:
                     device_readings_snapshot = dict(parsed.readings)
                     for key, (_, new_val) in state.hsa_pending.items():
                         state.status.readings[key] = new_val
@@ -646,13 +735,28 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         From 30_DUOFERN.pm: after ACK, send STATUS_RETRY_COUNT status requests
         to get the updated state quickly.
+        For 0xE1: NO status requests. _send_status_request uses HSA-zeros for
+        0xE1, which the device answers with CC, which would call this handler
+        again — causing exponential queue growth. Organic D3/F0 frames every
+        ~7s are sufficient for state updates.
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.debug("Command ACK from %s", device_code.hex)
-        # Clear pending retry — command was accepted by the device (CC)
         state = self.data.devices.get(device_code.hex)
         if state:
+            # Set receive-window guards based on what was just ACK'd (Bug_9/Bug_10).
+            # boost_retry_pending holds "on"/"off" for the last boost command sent.
+            if state.boost_retry_pending == "on":
+                # CC on Boost ON: first F0 has no receive window (Guard A).
+                state.boost_ha_on_pending_f0 = True
+                state.boost_off_cooldown = False
+            elif state.boost_retry_pending == "off":
+                # CC on Boost OFF: first D-frame has no receive window (Guard B).
+                state.boost_off_cooldown = True
+                state.boost_ha_on_pending_f0 = False
             state.boost_retry_pending = None
+        if device_code.device_type == 0xE1:
+            return
         for _ in range(STATUS_RETRY_COUNT):
             asyncio.create_task(self._send_status_request(device_code))
 
@@ -660,6 +764,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """#NACK, Befehl nicht vom Aktor empfangen (810108AA).
 
         Mark device as unavailable — it will recover on next successful status.
+        For 0xE1: NO status requests, NO unfreeze TX. Confirmed: the stick
+        does NOT freeze after AA — organic D3 frames arrive normally.
+        Any pending boost retry will be sent on the next organic D3.
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.warning("Missing ACK from %s — marking unavailable", device_code.hex)
@@ -667,6 +774,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if state:
             state.available = False
         self.async_set_updated_data(self.data)
+        if device_code.device_type == 0xE1:
+            return
+        for _ in range(STATUS_RETRY_COUNT):
+            asyncio.create_task(self._send_status_request(device_code))
 
     def _handle_not_initialized(self) -> None:
         """#NACK, Aktor nicht initialisiert (81010C55).
@@ -679,16 +790,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     def _handle_unknown_ack(self, frame: bytearray) -> None:
         """Handle unexpected 0x81 response that is not CC / AA / 55.
 
-        Known case: 810100BB — device received the command but rejected it.
-        The stick's ack_event fires (unblocking the send queue) but the
-        coordinator's normal CC path never runs, so no status retry happens
-        and any pending retry is lost.
-
-        Strategy: re-queue boost_retry_pending (saved before hsa_pending.clear)
-        so the command is retried on the next device-initiated status frame.
-        Also schedule status retries so we get the current device state.
+        Known cases:
+          810100BB — device received the command but rejected it.
+            Strategy: re-queue boost_retry_pending so it is retried on the
+            next device-initiated status frame.
+          810101DD — device is sleeping / not in receive window.
+            Observed after stick-unfreeze TX to a sleeping 0xE1. Not an error;
+            confirms the device is asleep. No retry needed — the next organic
+            D3 will carry the re-queued command from the earlier BB handler.
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
+
+        # DD = device sleeping after unfreeze TX — expected, not an error.
+        if frame[1] == 0x01 and frame[2] == 0x01 and frame[3] == 0xDD:
+            _LOGGER.debug(
+                "0x81/DD from %s — device sleeping (expected after unfreeze TX)",
+                device_code.hex,
+            )
+            return
+
         _LOGGER.warning(
             "Unexpected 0x81 response 0x%02X from %s — command may have been rejected",
             frame[3],
@@ -699,15 +819,61 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             retry_val = state.boost_retry_pending
             state.boost_retry_pending = None
             _LOGGER.info(
-                "Re-queuing boostActive=%s for %s after rejected command (0x%02X)",
-                retry_val,
+                "BB from %s — re-queuing boostActive=%s, scheduling stick-unfreeze TX",
                 device_code.hex,
-                frame[3],
+                retry_val,
             )
+            if device_code.device_type == 0xE1:
+                # Re-queue boostActive for next organic D3/F0 frame.
+                self._schedule_hsa_update(device_code, "boostActive", retry_val)
+                # Also re-queue boostDuration so the retry frame is fully formed.
+                # Without this, _send_hsa_if_pending sees boost_duration_val=None
+                # → boost_dur_for_frame falls back to pending_boost_duration (safe),
+                # but having it explicit in pending is cleaner and avoids relying on
+                # the fallback path. Belt-and-suspenders approach.
+                if retry_val in ("on", "True", "1", "true") and state is not None:
+                    self._schedule_hsa_update(
+                        device_code, "boostDuration", state.pending_boost_duration
+                    )
+                # Set receive-window guards like CC does, because BB doesn't
+                # reliably mean "rejected" — bug_boost_12 confirms boost ON got
+                # BB but device DID start boosting. If the device accepted, its
+                # first F0/D3 frame won't have a receive window. Without these
+                # guards, a re-queued command on that frame → another BB → loop.
+                if retry_val in ("on", "True", "1", "true"):
+                    state.boost_ha_on_pending_f0 = True
+                    state.boost_off_cooldown = False
+                elif retry_val in ("off", "False", "0", "false"):
+                    state.boost_off_cooldown = True
+                    state.boost_ha_on_pending_f0 = False
+                # After BB the stick stops forwarding RX until the next TX.
+                # The device is already sleeping so this TX will get AA — that's fine.
+                # We just need any TX to unfreeze the stick so the organic D3 gets through.
+                asyncio.create_task(self._send_stick_unfreeze(device_code))
+                return
             self._schedule_hsa_update(device_code, "boostActive", retry_val)
-        # Schedule status retries to get current device state
+        if device_code.device_type == 0xE1:
+            return
         for _ in range(STATUS_RETRY_COUNT):
             asyncio.create_task(self._send_status_request(device_code))
+
+    async def _send_stick_unfreeze(self, device_code: DuoFernId) -> None:
+        """Send a dummy TX to unfreeze the stick after BB for 0xE1.
+
+        After BB the stick stops forwarding incoming RX frames until it has sent
+        something. The device is already asleep so this will get AA — that's OK.
+        AA for 0xE1 is suppressed in _handle_missing_ack. The organic D3 frame
+        (sendingInterval=3min) will then arrive normally and trigger the retry
+        that was re-queued in hsa_pending.
+        """
+        await asyncio.sleep(0.3)
+        if self._stick is None:
+            return
+        # Send a plain HSA-zeros frame — the device is sleeping and will not respond,
+        # but the TX itself unfreezes the stick's RX forwarding.
+        frame = DuoFernEncoder.build_hsa_command(0, device_code)
+        _LOGGER.debug("Sending stick-unfreeze TX to %s after BB", device_code.hex)
+        await self._stick.send_command(frame)
 
     def _handle_pair_response(self, frame: bytearray) -> None:
         """#Device paired (0602...)."""
@@ -742,8 +908,22 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     # ------------------------------------------------------------------
 
     async def _send_status_request(self, device_code: DuoFernId) -> None:
-        """Send a status request to a specific device."""
+        """Send a status request to a specific device.
+
+        For 0xE1: this method is never called -- all three ACK handlers return
+        early for 0xE1. HomePilot also never polls 0xE1 reactively; it only
+        responds to device-initiated D3/F0 frames (sendingInterval = 3 min).
+        The guard below is a safety net in case of future callers.
+
+        For all other devices: use the standard 0DFF0F40 status request.
+        """
         if self._stick is None:
+            return
+        if device_code.device_type == 0xE1:
+            _LOGGER.warning(
+                "_send_status_request called for 0xE1 device %s -- suppressed",
+                device_code.hex,
+            )
             return
         frame = DuoFernEncoder.build_status_request(device_code, self._system_code)
         await self._stick.send_command(frame)
@@ -1555,34 +1735,86 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             else:
                 dur = int(device_readings.get("boostDuration", 30))
 
-            # Boost ON: encode current desired-temp in set_value so the device
-            # doesn't reject the frame when the setpoint was changed externally.
-            # Encoding: bitFrom=17, changeFlag=23, min=4, max=28, step=0.5
+            # OTA analysis (bug_boost_5 + bug_boost_6) confirms two distinct cases:
             #
-            # Boost OFF: set_value=0x000000. Verified from Homepilot OTA capture.
-            if active:
+            # CASE A — HA initiates boost (user clicks button, device was NOT boosting):
+            #   Device has NOT sent F0 yet. We are the trigger.
+            #   → Send f[8] = 0x40 | duration  (active-bit + duration)
+            #   → f[11] = 0x03
+            #   Evidence: bug_boost_6 03:40:10 — f[8]=0x55 (dur=21), f[11]=0x03
+            #
+            # CASE B — Device started boost itself (physical button press, F0 already sent):
+            #   Device IS already boosting (state.status.boost_active=True at TX time).
+            #   Homepilot sends an acknowledgement with f[8]=0x00 (no duration override).
+            #   → Send f[8] = 0x00  (no active-bit, no duration)
+            #   → f[11] = 0x03
+            #   Evidence: bug_boost_5 03:19:28 — f[8]=0x00, f[11]=0x03, dur=0
+            #   Sending f[8] with duration bit set when device is already boosting → BB.
+            #
+            # Distinction: device_already_boosting = state.status.boost_active at call time.
+            # (device_readings_snapshot reflects the parsed frame, not pending overrides)
+            device_already_boosting = device_readings.get("boostActive") == "on"
+
+            # OTA-verified f[8] encoding (bug_boost_5 + bug_boost_6):
+            #
+            # f[8] encodes the boost duration ONLY when it has CHANGED:
+            #   Duration CHANGED:   f[8] = 0x40 | new_duration (active bit + dur)
+            #   Duration UNCHANGED: f[8] = 0x00 (device uses its stored duration)
+            #
+            # Evidence:
+            #   bug5 03:19:28: dur 14→14 (unchanged) → f[8]=0x00  ✓
+            #   bug5 03:20:10: dur 14→14 (unchanged) → f[8]=0x00  ✓
+            #   bug6 03:40:10: dur  7→21 (CHANGED)   → f[8]=0x55  ✓
+            #
+            # f[11]=0x03 is always present for Boost ON regardless of f[8].
+            #
+            # Sending f[8] with active bit when duration is unchanged → BB!
+            # (confirmed by bug_boost_12: dur 14→14, f[8]=0x4E → BB)
+
+            # Compare against what the device currently reports
+            device_dur = int(device_readings.get("boostDuration", 0))
+            duration_actually_changed = (
+                boost_duration_val is not None and boost_duration_val != device_dur
+            )
+
+            if active and device_already_boosting:
+                # Taste-Boost Quittierung: acknowledge without overriding stored duration
+                boost_dur_for_frame = 0
+            elif active and duration_actually_changed:
+                # Duration changed: send new duration with active bit in f[8]
+                boost_dur_for_frame = dur
+            else:
+                # Duration unchanged (or Boost OFF): f[8]=0x00
+                # Device uses its stored duration for Boost ON.
+                boost_dur_for_frame = 0
+            desired_temp_pending = pending.get("desired-temp")
+            if desired_temp_pending is not None:
                 try:
-                    current_temp = float(
-                        device_readings.get(
-                            "desired-temp",
-                            state.status.desired_temp
-                            if state.status.desired_temp is not None
-                            else 20.0,
-                        )
-                    )
+                    current_temp = float(desired_temp_pending[1])
                 except (TypeError, ValueError):
                     current_temp = 20.0
                 current_temp = max(4.0, min(28.0, current_temp))
                 desired_raw = max(0, min(63, int((current_temp - 4.0) / 0.5)))
                 boost_set_value = (desired_raw << 17) | (1 << 23)
+                # Remove from set_value so it doesn't get sent as a separate HSA frame
+                set_value &= ~((0x3F << 17) | (1 << 23))
+                _LOGGER.debug(
+                    "HSA %s: piggybacking desired-temp=%.1f°C onto boost frame",
+                    device_code.hex,
+                    current_temp,
+                )
             else:
                 boost_set_value = 0
 
             boost_frame = DuoFernEncoder.build_hsa_command(
                 set_value=boost_set_value,
                 device_code=device_code,
-                boost_duration_min=dur if active else 0,
+                boost_duration_min=boost_dur_for_frame if active else 0,
                 boost_off=not active,
+                boost_on_ack=(active and device_already_boosting),
+                boost_on=(
+                    active and not device_already_boosting and boost_dur_for_frame == 0
+                ),
             )
             await self._stick.send_command(boost_frame)
             if active:
@@ -1597,16 +1829,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
 
-        # Send normal HSA frame only if there are non-boost pending keys (set_value > 0),
-        # OR if the device requested forceResponse AND no boost frame was sent.
-        #
-        # IMPORTANT: when a boost frame was sent, do NOT send an additional empty
-        # frame even if forceResponse > 0.  The Homepilot always sends exactly one
-        # frame per device contact.  Sending a second frame with set_value=0 causes
-        # the device to flicker on the display and may reset the setpoint.
+        # HomePilot sendet nur wenn pending vorhanden. sv=0 auf normalem D3 → BB.
+        # Boost-Frame hat Vorrang — kein zweiter Frame danach.
         sent_boost = boost_active_val is not None or boost_duration_val is not None
         force_response = state.status.readings.get("forceResponse", 0)
-        if set_value > 0 or (int(force_response or 0) > 0 and not sent_boost):
+        if not sent_boost and (set_value > 0 or int(force_response or 0) > 0):
             frame = DuoFernEncoder.build_hsa_command(set_value, device_code)
             await self._stick.send_command(frame)
             _LOGGER.info(
@@ -1632,8 +1859,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 # incoming F0 frames don't immediately re-queue a boost OFF.
                 state.boost_deactivating = False
 
-        # Clear pending regardless (mirrors FHEM delete HSAold)
-        state.hsa_pending.clear()
+        # Clear only the keys that were in the snapshot — not any new ones
+        # queued concurrently while this task was running (async race condition).
+        for key in pending:
+            state.hsa_pending.pop(key, None)
 
     async def async_set_window_contact(
         self, device_code: DuoFernId, enable: bool
@@ -1731,7 +1960,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_status_request(
-            device_code, self._system_code, request_type=0x13
+            device_code, self._system_code, status_type=0x13
         )
         await self._stick.send_command(frame)
 
@@ -1743,7 +1972,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_status_request(
-            device_code, self._system_code, request_type=0x10
+            device_code, self._system_code, status_type=0x10
         )
         await self._stick.send_command(frame)
 

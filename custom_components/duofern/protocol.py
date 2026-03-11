@@ -630,6 +630,8 @@ class DuoFernEncoder:
         device_code: "DuoFernId",
         boost_duration_min: int = 0,
         boost_off: bool = False,
+        boost_on_ack: bool = False,
+        boost_on: bool = False,
     ) -> bytearray:
         """Build duoSetHSA command for Heizkörperantrieb (0xE1).
 
@@ -663,14 +665,32 @@ class DuoFernEncoder:
         # bytes 7-17 = 0x00 (duoSetHSA has no system_code field)
         # From FHEM: "0D011D80nnnnnn0000000000000000000000yyyyyy00"
         #              bytes 15-17 are 0x00, NOT system code!
-        # Boost bytes — OTA-verified (Homepilot capture, radio payload byte[1:] maps
-        # 1:1 to USB stick payload byte[1:], only the first byte differs 0x11 vs 0x0D):
-        #   Boost ON:  f[8] = 0x40 | duration_min  (bit6=active, bits5-0=minutes 4-60)
-        #              f[11] = 0x03
-        #   Boost OFF: f[8] = 0x00
-        #              f[11] = 0x02  ← confirmed from Homepilot OTA capture
-        # Verified OTA: Boost ON 22min→f[8]=0x56, 46min→0x6E, 56min→0x78.
-        if boost_duration_min > 0:
+        # Boost byte encoding — OTA-verified (bug_boost_5 + bug_boost_6):
+        #
+        #   Boost ON with duration change (HA-initiated, dur CHANGED):
+        #     f[8] = 0x40 | duration_min  (active-bit + duration)
+        #     f[11] = 0x03
+        #     Evidence: bug_boost_6 03:40:10 — f[8]=0x55 (dur=21)
+        #
+        #   Boost ON without duration change (HA-initiated, dur UNCHANGED):
+        #     f[8] = 0x00  (no duration override — device uses its stored duration)
+        #     f[11] = 0x03
+        #     Evidence: bug_boost_5 03:19:28 — f[8]=0x00, f[11]=0x03
+        #
+        #   Boost ON ACK (device started boost via button, F0 already sent):
+        #     f[8] = 0x00  (no duration override)
+        #     f[11] = 0x03
+        #     Evidence: bug_boost_5 03:19:28 — same encoding as dur-unchanged
+        #
+        #   Boost OFF:
+        #     f[8] = 0x00
+        #     f[11] = 0x02
+        #     Evidence: bug_boost_5 03:19:45 / bug_boost_6 03:42:57
+        if boost_on_ack or boost_on:
+            # Boost ON without duration override: f[8]=0x00, f[11]=0x03
+            f[11] = 0x03
+        elif boost_duration_min > 0:
+            # Boost ON with duration change: f[8]=0x40|dur, f[11]=0x03
             clamped = max(4, min(60, boost_duration_min))
             f[8] = 0x40 | (clamped & 0x3F)
             f[11] = 0x03
@@ -890,6 +910,31 @@ class DuoFernDecoder:
         if f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x11:
             return False
         return True
+
+    @staticmethod
+    def should_dispatch_ack(data: bytes | bytearray | str) -> bool:
+        """True if this ACK (0x81) frame should be forwarded to the coordinator.
+
+        CC (810003CC), AA (810108AA) and BB (810100BB) are dispatched so the
+        coordinator's _handle_cmd_ack, _handle_missing_ack and _handle_unknown_ack
+        handlers actually run. Other 0x81 frames (e.g. 55) are silently dropped.
+
+        DD (810101DD) is dispatched so _handle_unknown_ack can log it. Observed
+        after sending a stick-unfreeze TX to a sleeping 0xE1 device — the device
+        is not in receive mode and responds with this code. It is not an error.
+        """
+        f = DuoFernDecoder._ensure_bytes(data)
+        if f[0] != 0x81:
+            return False
+        if f[1] == 0x00 and f[2] == 0x03 and f[3] == 0xCC:
+            return True
+        if f[1] == 0x01 and f[2] == 0x08 and f[3] == 0xAA:
+            return True
+        if f[1] == 0x01 and f[2] == 0x00 and f[3] == 0xBB:
+            return True
+        if f[1] == 0x01 and f[2] == 0x01 and f[3] == 0xDD:
+            return True
+        return False
 
     # -- Device code extraction --
 
