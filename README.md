@@ -388,7 +388,7 @@ python3 tools/pair_duofern.py pair --timeout 120 -v  # Extended timeout + debug
 - **Position convention**: DuoFern 0 = open / 100 = closed; HA 0 = closed / 100 = open (inverted transparently)
 - **HSA (Heizkörperantrieb)**: Device-initiated bidirectional protocol — changes are queued and transmitted only when the device checks in with a status frame, matching FHEM's `%commandsHSA` / `HSAold` implementation
 - **Boost frame layout** (OTA-verified via rtl_433):
-  - ON: `f[8] = 0x40 | duration_min`, `f[11] = 0x03`
+  - ON: `f[8] = 0x40 | duration_min` (only if duration changed, else `0x00`), `f[11] = 0x03`; `sv` contains desired-temp only if it was changed, else `0x000000`
   - OFF: `f[8] = 0x00`, `f[11] = 0x02` (critical — `0x00` is silently ignored by the device)
 
 #### Sniffing DuoFern Radio Frames (rtl_433)
