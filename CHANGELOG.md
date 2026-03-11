@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.0.5] — 2026-03-11
+
+### Bug Fixes
+
+- **Heizkörperantrieb Boost** — Boost now works as intended - thanks for the feedback. I tried
+ to find all edge cases but someone found even more.
+
+
 ## [v2.0.4] — 2026-03-10
 
 ### Bug Fixes
