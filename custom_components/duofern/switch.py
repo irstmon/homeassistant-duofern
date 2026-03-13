@@ -49,15 +49,16 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
-from .const import DOMAIN
+from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
 from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 
-# Device type sets — used by both DuoFernSwitch and automation switches
-_ALL_COVERS = frozenset({0x40, 0x41, 0x42, 0x47, 0x49, 0x4B, 0x4C, 0x4E, 0x61, 0x70})
-_TROLL_TYPES = frozenset({0x42, 0x47, 0x49, 0x4B, 0x4C, 0x70})
+# ALL_COVER_TYPES and TROLL_COVER_TYPES are imported from const.py to avoid
+# duplication with number.py. Local aliases for readability within this module.
+_ALL_COVERS = ALL_COVER_TYPES
+_TROLL_TYPES = TROLL_COVER_TYPES
 _SWITCH_TYPES = frozenset({0x43, 0x46, 0x71})
 _DIMMER_TYPES = frozenset({0x48, 0x4A})
 _ALL_ACTUATORS = _ALL_COVERS | _SWITCH_TYPES | _DIMMER_TYPES
@@ -381,7 +382,6 @@ async def async_setup_entry(
                     coordinator=coordinator,
                     device_state=device_state,
                     hex_code=hex_code,
-                    entry_id=entry.entry_id,
                 )
             )
             _LOGGER.debug("Adding switch entity for device %s", hex_code)
@@ -437,7 +437,6 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
         coordinator: DuoFernCoordinator,
         device_state: DuoFernDeviceState,
         hex_code: str,
-        entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
@@ -552,9 +551,19 @@ class DuoFernAutomationSwitch(
     the main controls. The current state is read from device status readings.
 
     For most switches, the device reports its state in every status frame.
-    windowContact is the exception: 0xE1 never includes it in the status
-    frame. RestoreEntity is used so the last-set value survives HA restarts
-    and the switch doesn't show 'unknown' (lightning bolt icon) on startup.
+    windowContact was historically an exception (0xE1 did not include it in
+    status frames), but since StatusId 188 was added in const.py, windowContact
+    IS now read from the Format-29 frame (chan 01, position 4, bits 5-5).
+    RestoreEntity is still used as a fallback for the gap between restart
+    and the first live frame.
+
+    NOTE on modeChange / reversal:
+    These two switches only have a toggle command in the known protocol —
+    async_turn_on and async_turn_off both send the same payload (070C...).
+    The displayed is_on state is correct (read from status readings), but
+    pressing 'Off' when already Off will toggle the device to On.
+    TODO: Capture OTA frames from the original Rademacher app to verify
+    whether separate on/off commands exist for these flags.
 
     manualMode semantics (from 30_DUOFERN.pm):
       When manualMode=on is sent to the device, the device ITSELF suspends

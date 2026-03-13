@@ -43,7 +43,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
-from .const import DOMAIN
+from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
 from .protocol import DuoFernId
 
@@ -59,10 +59,10 @@ class DuoFernNumberDescription(NumberEntityDescription):
     coordinator_method: str = ""
 
 
-# Cover device types (all covers)
-_ALL_COVERS = frozenset({0x40, 0x41, 0x42, 0x47, 0x49, 0x4B, 0x4C, 0x4E, 0x61, 0x70})
-# Troll / RolloTube types (have runningTime, windMode etc.)
-_TROLL_TYPES = frozenset({0x42, 0x47, 0x49, 0x4B, 0x4C, 0x70})
+# ALL_COVER_TYPES and TROLL_COVER_TYPES are imported from const.py to avoid
+# duplication with switch.py. Local aliases for readability within this module.
+_ALL_COVERS = ALL_COVER_TYPES
+_TROLL_TYPES = TROLL_COVER_TYPES
 # Blinds types only (slat entities — 0x42|4B|4C|70 per FHEM dispatch)
 _BLINDS_TYPES = frozenset({0x42, 0x4B, 0x4C, 0x70})
 # Running time for covers: setsTroll dispatch = 42|47|4B|4C|70, NOT 0x49
@@ -264,6 +264,11 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="latitude",
         reading_key="latitude",
         name="Latitude",
+        # Protocol limitation: the FHEM reference (%commandsHSA) defines
+        # latitude as min=0, max=90. The DuoFern protocol encodes latitude
+        # as a single unsigned byte (0-90), so southern hemisphere latitudes
+        # (negative values) cannot be represented. This is a hardware/protocol
+        # constraint, not a software choice.
         native_min_value=0,
         native_max_value=90,
         native_step=1,
@@ -277,6 +282,12 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="longitude",
         reading_key="longitude",
         name="Longitude",
+        # Protocol limitation: the FHEM reference (%commandsHSA) defines
+        # longitude as min=-90, max=90 with offset=256 for negative values
+        # (i.e. -90 is stored as 256-90=166). The encoding uses a single byte,
+        # so the valid range is capped at ±90°. Locations east of 90°E or west
+        # of 90°W cannot be represented in this protocol. This is intentional
+        # per the Rademacher protocol specification, not a bug.
         native_min_value=-90,
         native_max_value=90,
         native_step=1,
@@ -429,9 +440,15 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
         return self._restored_value
 
     async def async_set_native_value(self, value: float) -> None:
-        """Send the new value to the device."""
+        """Send the new value to the device.
+
+        value is passed as float (not int) to preserve precision for entities
+        with native_step=0.5 (temperature thresholds on the Raumthermostat 0x73).
+        Coordinator methods that expect integer values (e.g. position 0-100)
+        perform their own rounding/conversion internally.
+        """
         method = getattr(self.coordinator, self.entity_description.coordinator_method)
-        await method(self._device_code, int(value))
+        await method(self._device_code, float(value))
 
     @callback
     def _handle_coordinator_update(self) -> None:

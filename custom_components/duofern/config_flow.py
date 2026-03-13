@@ -13,6 +13,7 @@ An options flow allows editing the device list after initial setup.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -249,7 +250,9 @@ class DuoFernOptionsFlow(OptionsFlow):
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
-        self._config_entry = config_entry
+        # Note: OptionsFlow base class provides self.config_entry automatically.
+        # No need to store a separate reference.
+        super().__init__(config_entry)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -270,30 +273,27 @@ class DuoFernOptionsFlow(OptionsFlow):
                 else:
                     # Update entry.data with new device list
                     auto_discover: bool = user_input.get(CONF_AUTO_DISCOVER, False)
-                    # Update entry.data with new device list
                     self.hass.config_entries.async_update_entry(
-                        self._config_entry,
+                        self.config_entry,
                         data={
-                            **self._config_entry.data,
+                            **self.config_entry.data,
                             CONF_PAIRED_DEVICES: device_codes,
                         },
                     )
-                    # Reload the integration to re-run init with new devices
-                    await self.hass.config_entries.async_reload(
-                        self._config_entry.entry_id
-                    )
-                    # async_create_entry(data=...) is what HA uses to persist
-                    # entry.options — do NOT call async_update_entry for options
-                    # as async_create_entry would overwrite it with {}.
+                    # async_create_entry(data=...) persists entry.options and
+                    # triggers _async_update_listener → async_reload with the
+                    # already-saved new data. No explicit async_reload needed here —
+                    # calling it before async_create_entry would reload with the
+                    # old options (auto_discover not yet saved).
                     return self.async_create_entry(
                         data={CONF_AUTO_DISCOVER: auto_discover}
                     )
 
         # Pre-fill with current device codes
-        current_codes: list[str] = self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
+        current_codes: list[str] = self.config_entry.data.get(CONF_PAIRED_DEVICES, [])
         default_value = ", ".join(current_codes) if current_codes else ""
 
-        current_auto_discover: bool = self._config_entry.options.get(
+        current_auto_discover: bool = self.config_entry.options.get(
             CONF_AUTO_DISCOVER, False
         )
 
@@ -338,16 +338,13 @@ def _check_serial_port(port: str) -> bool:
     """Check if a serial port path exists and is accessible.
 
     Runs in executor thread (blocking I/O).
+    Both os and serial are imported at module level — no late imports needed.
     """
-    import os
-
     if not os.path.exists(port):
         _LOGGER.warning("Serial port does not exist: %s", port)
         return False
 
     try:
-        import serial  # type: ignore[import-untyped]
-
         ser = serial.Serial(port, timeout=1)
         ser.close()
         return True

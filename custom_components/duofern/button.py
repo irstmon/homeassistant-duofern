@@ -84,7 +84,9 @@ async def async_setup_entry(
             if device_state.channel
             else device_state.device_code
         )
-        dev_type = dev_code.device_type
+        # Note: dev_type is intentionally not defined here — all conditions in
+        # this loop use dev_code.is_* properties, not the raw device_type int.
+        # dev_type is only needed in the second loop below (Umweltsensor buttons).
 
         # reset:settings,full for all devices that support it
         # From 30_DUOFERN.pm %setsBasic / %setsReset: covers, switches, dimmers
@@ -138,12 +140,11 @@ async def async_setup_entry(
         ):
             entities.append(DuoFernGetStatusButton(coordinator, dev_code))
 
-        # Umweltsensor 00 channel: getWeather, getTime, getConfig, writeConfig, setTime
-        if (
-            dev_type == 0x69
-            and hasattr(dev_code, "channel")
-            and str(getattr(dev_code, "channel", "")) == "00"
-        ):
+        # Umweltsensor channel "00" (weather station sub-device): create the
+        # weather station buttons. Channel "00" is registered via DEVICE_CHANNELS[0x69]
+        # in const.py. DuoFernId.channel is a dataclass field (always present),
+        # so hasattr/getattr checks are unnecessary — dev_code.channel is safe to access.
+        if dev_type == 0x69 and dev_code.channel == "00":
             entities.append(DuoFernGetWeatherButton(coordinator, dev_code))
             entities.append(DuoFernGetTimeButton(coordinator, dev_code))
             entities.append(DuoFernGetConfigButton(coordinator, dev_code))
@@ -556,7 +557,11 @@ class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     """Request current status from a single DuoFern device.
 
     From 30_DUOFERN.pm: getStatus => commandsStatus{getStatus} = "0F"
-    Builds: 0DFF0F400000000000000000000000000000CCCCCC01
+    Frame template: 0DFF0F40000000000000000000000000DDDDDD00
+      Where DDDDDD is the 6-digit device code (bytes 16-18).
+      Bytes 15-17 (positions 30-35 in the hex string) are 000000 —
+      NOT the system code. The CCCCCC notation sometimes seen in FHEM
+      comments refers to the device code, not the system/dongle code.
     FHEM command: set DEVICENAME getStatus
     """
 

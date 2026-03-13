@@ -61,7 +61,6 @@ async def async_setup_entry(
                     coordinator=coordinator,
                     device_state=device_state,
                     hex_code=hex_code,
-                    entry_id=entry.entry_id,
                 )
             )
             _LOGGER.debug("Adding light entity for device %s", hex_code)
@@ -99,7 +98,6 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
         coordinator: DuoFernCoordinator,
         device_state: DuoFernDeviceState,
         hex_code: str,
-        entry_id: str,
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code

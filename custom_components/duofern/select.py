@@ -30,6 +30,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
@@ -185,12 +186,16 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern select entities", len(entities))
 
 
-class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
+class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, RestoreEntity):
     """A DuoFern multi-option configuration setting as a SelectEntity.
 
     The current value is read from the device's status readings (as set by
     parse_status() in protocol.py). Changing the value sends the corresponding
     command from %commands in 30_DUOFERN.pm.
+
+    Uses RestoreEntity so that after an HA restart the last known value is
+    shown immediately instead of 'unknown', until the first live status frame
+    arrives from the device.
     """
 
     entity_description: DuoFernSelectDescription
@@ -210,6 +215,17 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}"
         self._attr_options = list(description.options)
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._restored_option: str | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known option for display until first live frame arrives."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            self._restored_option = last_state.state
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -219,19 +235,28 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
 
     @property
     def available(self) -> bool:
+        """Return True only if device is present AND last coordinator update succeeded.
+
+        Without the last_update_success check, the select entity would appear
+        available even when the serial connection is down — because device state
+        objects remain in coordinator.data between reconnects.
+        """
+        if not self.coordinator.last_update_success:
+            return False
         state = self._device_state
         return state is not None and state.available
 
     @property
     def current_option(self) -> str | None:
-        """Return current option read from device status."""
+        """Return current option read from device status, with restored fallback."""
         state = self._device_state
-        if state is None:
-            return None
-        val = state.status.readings.get(self.entity_description.reading_key)
-        if val is None:
-            return None
-        return str(val)
+        if state is not None:
+            val = state.status.readings.get(self.entity_description.reading_key)
+            if val is not None:
+                live = str(val)
+                self._restored_option = live  # keep in sync for next restart
+                return live
+        return self._restored_option
 
     async def async_select_option(self, option: str) -> None:
         """Send the selected option to the device."""

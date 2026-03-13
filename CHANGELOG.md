@@ -1,5 +1,85 @@
 # Changelog
 
+## [v2.1.0] — 2026-03-13
+
+### Code Review & Quality Release
+
+Full code review of the entire integration codebase. 42 findings identified and resolved in the
+first review pass, 10 additional issues caught and fixed in two follow-up review rounds.
+
+### Bug Fixes
+
+- **Temperature slider lost 0.5°C precision** — `int(value)` in `number.py` truncated half-degree
+  steps on the Raumthermostat (`0x73`). Setting 22.5°C silently became 22°C. Changed to `float(value)`.
+- **HomeTimer (`0xA8`) and Handzentrale (`0xE0`) missing from `REMOTE_DEVICE_TYPES`** — both were
+  incorrectly classified as actors. They received `remotePair`/`remoteUnpair`/`remoteStop` buttons
+  (which don't exist on these devices) and their `duofern_event` events weren't handled properly
+  by `event.py` and `device_trigger.py`.
+- **5 phantom sensor entities per sun/wind sensor device** — `SENSOR_DEVICE_TYPES` included
+  `0xA5`/`0xA9`/`0xAA`/`0xAF`, but only the Umweltsensor (`0x69`) actually sends weather data frames.
+  All 5 sensor entities (brightness, temperature, wind, sunDirection, sunHeight) were permanently
+  unavailable for the other types. Split into `SENSOR_DEVICE_TYPES = {0x69}` and documented why.
+- **Umweltsensor (`0x69`) weather station buttons never created** — `DEVICE_CHANNELS[0x69]` only
+  listed channel `"01"`. Channel `"00"` (the weather station) was never registered, so `getWeather`,
+  `getTime`, `getConfig`, `writeConfig`, and `setTime` buttons were never created.
+- **Options flow reloaded with stale data** — an explicit `async_reload` call before
+  `async_create_entry` caused a double reload, the first with old options (auto_discover not yet saved).
+- **HVAC mode showed OFF after restart** — `hvac_mode` derived from `self.target_temperature` which
+  fell back to `TEMP_MIN` (4.0°C) before the first live frame. Now uses live data only and defaults
+  to `HEAT` as the safe fallback.
+- **Cover obstacle/block/lightCurtain shown twice** — these readings appeared both as dedicated
+  `BinarySensorEntity` instances and as extra attributes on the cover entity.
+- **Duplicate `modeChange` key in `AUTOMATION_COMMANDS`** — Python silently used the last entry.
+  Both had identical payloads so it was harmless, but a latent risk for future edits.
+- **Redundant state lookup in `_handle_weather_data`** — `state` was fetched twice from the same
+  dictionary within the same function.
+- **Timestamps displayed with wrong timezone offset** — `datetime.now()` produces naive local time,
+  but `dt_util.as_local()` interpreted it as UTC. All timestamps (`last_seen`, `boost_start`) now use
+  timezone-aware `dt_util.now()`.
+- **Translation fixes:**
+  - `boost_duration` was listed under `entity.select` in `de.json` instead of `entity.number`
+  - `boost_duration` was completely missing from `en.json` and `strings.json`
+  - 7 select entities (`motorDeadTime`, `windDirection`, `rainDirection`, `automaticClosing`,
+    `openSpeed`, `actTempLimit`, `interval`) had no state translations — dropdowns showed raw values
+  - `running_time_cover` and `running_time_dimmer` had identical display names
+  - `window_contact_automatic` was named "Window open" (sounds like a state, not a setting) — renamed
+    to "Window Open Signal"
+  - Orphaned `window_contact` key removed from `entity.switch` translations
+
+### Improvements
+
+- **Reconnect guard** — added `_reconnecting` flag to prevent multiple parallel reconnect tasks when
+  the stick sends several `NOT_INITIALIZED` (81010C55) frames in quick succession
+- **Send queue crash detection** — `DuoFernStick` now uses a `done_callback` on the queue task.
+  If `_process_send_queue` crashes, the error is logged immediately and the coordinator triggers a
+  reconnect via `error_callback`. Previously a crash was completely silent — the integration appeared
+  connected but nothing was sent
+- **Stale entity cleanup safety** — if `registered_unique_ids` is empty after platform setup (likely
+  a platform load failure), cleanup is skipped entirely with a warning instead of deleting all entities
+- **Window/door contact sensor state restored on restart** — `DuoFernWindowSensor` (`0xAC`) now
+  uses `RestoreEntity`. Previously it always showed "closed" after restart until the next event
+- **Select entities restored on restart** — `DuoFernSelect` now uses `RestoreEntity` so the last
+  known value is shown immediately instead of "unknown"
+- **SetPairs failure summary** — devices that don't acknowledge during init are now tracked in a list
+  and summarized in a single warning after the loop
+- **`available` check in select entities** — now also checks `coordinator.last_update_success` so
+  entities don't appear available when the serial connection is down
+- **Device trigger warning** — `async_attach_trigger` now logs a warning when a device is not found,
+  instead of silently returning a no-op trigger
+- **All asyncio tasks tracked by HA lifecycle** — all bare `asyncio.create_task` calls replaced with
+  `hass.async_create_task` for clean cancellation on integration unload
+- **Late imports cleaned up** — `import datetime` inside `async_set_time`, `import os`/`import serial`
+  inside `_check_serial_port`, and 4× `from homeassistant.util import dt` inside sensor properties
+  all moved to module level
+- **Unused code removed** — `entry_id` parameter in `DuoFernLight`, `DuoFernSwitch`, `DuoFernCover`;
+  unused `dev_type` variable in `button.py`; duplicate `EVENT_ONLY_SENSOR_TYPES` set in `const.py`;
+  duplicate `_ALL_COVERS`/`_TROLL_TYPES` definitions moved to `const.py`
+- **All source code comments translated to English** — per project convention
+- **Misleading comments corrected** — obstacle sensor docstring, frame template in button.py,
+  `TROLL_COVER_TYPES` comment, `windowContact` status docstring
+
+---
+
 ## [v2.0.5] — 2026-03-11
 
 ### Bug Fixes

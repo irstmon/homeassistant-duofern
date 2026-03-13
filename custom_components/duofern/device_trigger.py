@@ -13,6 +13,8 @@ From 30_DUOFERN.pm sensorMsg:
 
 from __future__ import annotations
 
+import logging
+
 import voluptuous as vol
 
 from homeassistant.components.device_automation import DEVICE_TRIGGER_BASE_SCHEMA
@@ -30,6 +32,8 @@ from .const import (
     WIND_SENSOR_DEVICE_TYPES,
 )
 from .coordinator import DUOFERN_EVENT
+
+_LOGGER = logging.getLogger(__name__)
 
 CONF_SUBTYPE = "subtype"
 
@@ -158,6 +162,12 @@ async def async_attach_trigger(
     """
     result = _get_hex_code_and_type(hass, config[CONF_DEVICE_ID])
     if result is None:
+        _LOGGER.warning(
+            "DuoFern device_trigger: device %s not found in integration data — "
+            "trigger will be silently inactive. The device may have been removed "
+            "from the paired devices list.",
+            config[CONF_DEVICE_ID],
+        )
         return lambda: None
 
     hex_code, _device_type = result

@@ -208,9 +208,6 @@
       "trigger_rain": {
         "name": "Regenauslöser"
       },
-      "window_contact": {
-        "name": "Fensterkontakt"
-      },
       "ten_minute_alarm": {
         "name": "10-Minuten-Alarm"
       },
@@ -221,7 +218,7 @@
         "name": "Rücksprung"
       },
       "window_contact_automatic": {
-        "name": "Fenster offen"
+        "name": "Fenster-offen-Signal"
       },
       "boost": {
         "name": "Boost"
@@ -244,7 +241,7 @@
         "name": "Standard-Lamellenposition"
       },
       "running_time_cover": {
-        "name": "Laufzeit"
+        "name": "Laufzeit (Rollo)"
       },
       "stairwell_time": {
         "name": "Treppenhauszeit"
@@ -253,7 +250,7 @@
         "name": "Zwischenwert"
       },
       "running_time_dimmer": {
-        "name": "Laufzeit"
+        "name": "Laufzeit (Dimmer)"
       },
       "temp_threshold_1": {
         "name": "Temperaturschwelle 1"
@@ -278,6 +275,9 @@
       },
       "sending_interval": {
         "name": "Sendeintervall"
+      },
+      "boost_duration": {
+        "name": "Boost-Dauer"
       }
     },
     "select": {
@@ -296,22 +296,69 @@
         }
       },
       "motor_dead_time": {
-        "name": "Motorstillstandszeit"
+        "name": "Motor-Totzeit",
+        "state": {
+          "off": "Aus",
+          "short": "Kurz",
+          "long": "Lang"
+        }
       },
       "automatic_closing": {
-        "name": "Automatisches Schließen"
+        "name": "Automatisches Schließen",
+        "state": {
+          "off": "Aus",
+          "30": "30 s",
+          "60": "60 s",
+          "90": "90 s",
+          "120": "120 s",
+          "150": "150 s",
+          "180": "180 s",
+          "210": "210 s",
+          "240": "240 s"
+        }
       },
       "open_speed": {
-        "name": "Öffnungsgeschwindigkeit"
+        "name": "Öffnungsgeschwindigkeit",
+        "state": {
+          "11": "11 s",
+          "15": "15 s",
+          "19": "19 s"
+        }
       },
       "act_temp_limit": {
-        "name": "Aktive Temperaturschwelle"
+        "name": "Aktiver Temperaturbereich",
+        "state": {
+          "1": "Bereich 1",
+          "2": "Bereich 2",
+          "3": "Bereich 3",
+          "4": "Bereich 4"
+        }
       },
       "interval": {
-        "name": "Sendeintervall"
-      },
-      "boost_duration": {
-        "name": "Boost-Dauer"
+        "name": "Übertragungsintervall",
+        "state": {
+          "off": "Aus",
+          "1": "1 Min.",
+          "2": "2 Min.",
+          "3": "3 Min.",
+          "4": "4 Min.",
+          "5": "5 Min.",
+          "6": "6 Min.",
+          "7": "7 Min.",
+          "8": "8 Min.",
+          "9": "9 Min.",
+          "10": "10 Min.",
+          "15": "15 Min.",
+          "20": "20 Min.",
+          "30": "30 Min.",
+          "40": "40 Min.",
+          "50": "50 Min.",
+          "60": "60 Min.",
+          "70": "70 Min.",
+          "80": "80 Min.",
+          "90": "90 Min.",
+          "100": "100 Min."
+        }
       }
     },
     "sensor": {
