@@ -59,6 +59,7 @@ class DuoFernStick:
         system_code: DuoFernId,
         paired_devices: list[DuoFernId],
         message_callback: Callable[[bytearray], None],
+        error_callback: Callable[[Exception], None] | None = None,
     ) -> None:
         """Initialize the stick manager.
 
@@ -67,11 +68,15 @@ class DuoFernStick:
             system_code:      6-char hex dongle serial starting with 6F
             paired_devices:   List of paired device codes to register on init
             message_callback: Called for every dispatchable message received
+            error_callback:   Optional callback invoked when the send queue task
+                              crashes. Used by the coordinator to trigger a reconnect.
+                              Signature: (exc: Exception) -> None
         """
         self._port = port
         self._system_code = system_code
         self._paired_devices = paired_devices
         self._message_callback = message_callback
+        self._on_error = error_callback
 
         self._transport: asyncio.Transport | None = None
         self._serial_protocol: DuoFernSerialProtocol | None = None
@@ -123,8 +128,14 @@ class DuoFernStick:
         # Run the initialization handshake
         await self._init_sequence()
 
-        # Start the ACK-gated send queue processor
+        # Start the ACK-gated send queue processor.
+        # A done_callback is attached so that if the task exits unexpectedly
+        # (e.g. an unhandled exception in _process_send_queue), the error is
+        # logged immediately and a reconnect is triggered via the on_error callback.
+        # Without this, the task could die silently and all subsequent send_command
+        # calls would queue up forever with no output — confirmed as a real bug.
         self._queue_task = asyncio.create_task(self._process_send_queue())
+        self._queue_task.add_done_callback(self._on_queue_task_done)
 
         _LOGGER.info("DuoFern stick initialized successfully")
 
@@ -146,6 +157,38 @@ class DuoFernStick:
 
         self._connected = False
         _LOGGER.info("DuoFern stick disconnected")
+
+    def _on_queue_task_done(self, task: asyncio.Task) -> None:
+        """Handle unexpected termination of the send queue processor task.
+
+        Called automatically when _queue_task finishes — either normally
+        (disconnect called), due to cancellation, or due to an unhandled error.
+
+        If the task raised an exception, we log it at ERROR level so it is
+        immediately visible in the HA log. We then invoke the on_error callback
+        (if set) which triggers coordinator reconnect — same path as other
+        stick errors.
+
+        Without this callback, a crash in _process_send_queue was completely
+        silent: all subsequent send_command calls would enqueue frames but
+        nothing would ever be sent to the serial port.
+        """
+        if self._closing:
+            # Normal shutdown — task was cancelled by disconnect(), not an error.
+            return
+        try:
+            exc = task.exception()
+        except asyncio.CancelledError:
+            return  # Cancelled during a non-closing disconnect — acceptable
+        if exc is not None:
+            _LOGGER.error(
+                "DuoFern send queue task crashed unexpectedly: %s — "
+                "triggering reconnect. No commands will be sent until reconnected.",
+                exc,
+                exc_info=exc,
+            )
+            if self._on_error:
+                self._on_error(exc)
 
     async def send_command(self, frame: bytearray) -> None:
         """Enqueue a command frame for sending.
@@ -217,18 +260,30 @@ class DuoFernStick:
                 # From 10_DUOFERNSTICK.pm: duoSetPairs = "03nnyyyyyy..."
                 #   nn = slot index (0-based)
                 #   yyyyyy = device code
+                _failed_devices: list[str] = []
                 for idx, device in enumerate(self._paired_devices):
                     resp = await self._send_and_wait(
                         DuoFernEncoder.build_set_pair(idx, device)
                     )
                     if resp is None:
                         _LOGGER.warning(
-                            "Failed to register device %s at slot %d",
+                            "Device %s did not respond during init (slot %d) — "
+                            "commands to this device may not work until reconnect.",
                             device.hex,
                             idx,
                         )
+                        _failed_devices.append(device.hex)
                         continue
                     self._write_frame(DuoFernEncoder.build_ack())
+
+                if _failed_devices:
+                    _LOGGER.warning(
+                        "DuoFern init: %d device(s) did not acknowledge SetPairs: %s. "
+                        "These devices will not receive commands until the next "
+                        "successful reconnect.",
+                        len(_failed_devices),
+                        ", ".join(_failed_devices),
+                    )
 
                 # Step 6: InitEnd — signals end of device registration
                 resp = await self._send_and_wait(DuoFernEncoder.build_init_end())

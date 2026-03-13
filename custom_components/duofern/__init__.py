@@ -15,16 +15,16 @@ Architecture:
                      transcribed 1:1 from 30_DUOFERN.pm
   cover.py        → CoverEntity for roller shutters (RolloTron, Rohrmotor,
                      Troll, SX5) — all cover formats 21/23/23a/24/24a
-  button.py       → ButtonEntity for stick control: pairing starten,
-                     unpairing starten, status aller Geräte abfragen
-  diagnostics.py  → HA diagnostics panel ("Diagnose herunterladen") with
+  button.py       → ButtonEntity for stick control: start pairing,
+                     start unpairing, request status of all devices
+  diagnostics.py  → HA diagnostics panel ("Download diagnostics") with
                      full device snapshot (codes, types, readings, versions)
   switch.py       → SwitchEntity for Universalaktor (2-channel), Steckdosenaktor,
-                     Troll Lichtmodus — all readings as extra_state_attributes
+                     Troll light mode — all readings as extra_state_attributes
   light.py        → LightEntity for Dimmaktor / Dimmer 9476 with brightness
   climate.py      → ClimateEntity for Raumthermostat and Heizkörperantrieb
-  binary_sensor.py→ BinarySensorEntity for Bewegungsmelder, Rauchmelder,
-                     Fenster-Tuer-Kontakt — state via duofern_event bus
+  binary_sensor.py→ BinarySensorEntity for motion detector, smoke detector,
+                     window/door contact — state via duofern_event bus
   sensor.py       → SensorEntity for Umweltsensor weather readings
                      (brightness, temperature, wind, sunDirection, sunHeight)
   switch.py (2)   → Also creates DuoFernAutomationSwitch (CONFIG) for every
@@ -244,6 +244,19 @@ async def _async_cleanup_stale_devices(
     #       This is the ground truth: anything NOT in this set is stale. ───────
     current_unique_ids: set[str] = coordinator.data.registered_unique_ids
 
+    # Safety guard: if no unique_ids were registered at all, one or more
+    # platforms failed to load (e.g. button.py raised during async_setup_entry).
+    # In that case skip stale-entity cleanup entirely to avoid incorrectly
+    # deleting entities that simply weren't registered this run due to the error.
+    # The missing entities will re-appear on the next successful startup.
+    if not current_unique_ids:
+        _LOGGER.warning(
+            "DuoFern: no unique_ids were registered during platform setup — "
+            "skipping stale entity cleanup to avoid accidental entity deletion. "
+            "Check integration logs for platform load errors."
+        )
+        return
+
     # ── 3. Remove stale devices (and their child entities) ──────────────────
     for device_entry in dr.async_entries_for_config_entry(device_reg, entry.entry_id):
         device_idents = {
@@ -274,9 +287,10 @@ async def _async_cleanup_stale_devices(
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         if reg_entry.unique_id not in current_unique_ids:
             entity_reg.async_remove(reg_entry.entity_id)
-            _LOGGER.debug(
-                "Removed stale entity '%s' (unique_id '%s' no longer created "
-                "by current integration version)",
+            _LOGGER.warning(
+                "Removed stale entity '%s' (unique_id '%s' is no longer created "
+                "by the current integration version — this is expected after an "
+                "integration update that removed or renamed entity types)",
                 reg_entry.entity_id,
                 reg_entry.unique_id,
             )

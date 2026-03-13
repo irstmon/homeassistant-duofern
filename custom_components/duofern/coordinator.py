@@ -58,6 +58,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_AUTO_DISCOVER,
@@ -203,6 +204,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._pairing_task: asyncio.Task[None] | None = None
         self._unpairing_task: asyncio.Task[None] | None = None
 
+        # Guard flag to prevent multiple parallel reconnect tasks when the stick
+        # sends several NOT_INITIALIZED (81010C55) frames in quick succession.
+        self._reconnecting: bool = False
+
         # Optional callback invoked when a new device is paired via the stick's
         # pairing button. Registered by async_setup_entry in __init__.py so the
         # new device's hex code can be persisted into the config entry data.
@@ -270,6 +275,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             system_code=self._system_code,
             paired_devices=self._paired_devices,
             message_callback=self._on_message,
+            error_callback=self._on_stick_queue_error,
         )
         await self._stick.connect()
         _LOGGER.info(
@@ -315,7 +321,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if device_code.device_type_name.startswith("Unknown"):
             return
         _LOGGER.info(
-            "Unbekanntes DuoFern-Gerät empfangen: %s (%s) — Discovery wird gestartet",
+            "Unknown DuoFern device received: %s (%s) — triggering discovery",
             device_code.hex,
             device_code.device_type_name,
         )
@@ -420,7 +426,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 parsed = DuoFernDecoder.parse_status(frame, channel=ch)
                 state.status = parsed
                 state.available = True
-                state.last_seen = datetime.now().isoformat(timespec="seconds")
+                state.last_seen = dt_util.now().isoformat(timespec="seconds")
             if not any_found:
                 _LOGGER.debug(
                     "Status from unknown channel device %s — ignoring", hex_code
@@ -447,7 +453,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
             state.status = parsed
             state.available = True
-            state.last_seen = datetime.now().isoformat(timespec="seconds")
+            state.last_seen = dt_util.now().isoformat(timespec="seconds")
 
             # Fix: during boost, device reports desired-temp=28°C.
             # Restore the real setpoint so HA shows the correct value.
@@ -520,38 +526,38 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             if device_code.device_type == 0xE1:
                 # Track boost start time: fires only on the False→True transition.
                 if parsed.boost_active and not prev_boost_active:
-                    state.boost_start = datetime.now()
+                    state.boost_start = dt_util.now()
 
-                # HSA-Antwort — OTA-Regel aus bug_boost_5 + bug_boost_6:
+                # HSA response rule — derived from OTA captures bug_boost_5 + bug_boost_6:
                 #
-                #   D3/D4/D5/E0 (boost inaktiv):
-                #     → Senden wenn etwas pending (Boost ON, desired-temp, etc.)
+                #   D3/D4/D5/E0 (boost inactive):
+                #     → Send if anything is pending (Boost ON, desired-temp, etc.)
                 #
-                #   F0 (boost aktiv, kein OFF pending):
-                #     → NICHT senden.
+                #   F0 (boost active, no OFF pending):
+                #     → Do NOT send.
                 #
-                #   F0 (boost aktiv, boost OFF pending):
-                #     → SOFORT senden — aber nur wenn Empfangsfenster offen!
+                #   F0 (boost active, boost OFF pending):
+                #     → Send IMMEDIATELY — but only when receive window is open!
                 #
                 # RECEIVE-WINDOW GUARDS (Bug_9 / Bug_10):
                 #
-                #   Guard A — erstes F0 nach HA-initiiertem Boost ON:
-                #     Das Gerät öffnet sein Empfangsfenster erst beim ZWEITEN F0
-                #     nach einem CC auf Boost ON. Das erste F0 (~sendInterval sek
-                #     nach CC) hat kein Fenster → Boost OFF jetzt → BB/AA.
-                #     Fix: boost_ha_on_pending_f0=True nach CC. Auf dem ersten F0
-                #     das Flag löschen ohne TX. Ab dem zweiten F0 normal senden.
+                #   Guard A — first F0 after HA-initiated Boost ON:
+                #     The device only opens its receive window on the SECOND F0
+                #     after a CC on Boost ON. The first F0 (~sendInterval seconds
+                #     after CC) has no window → sending Boost OFF now → BB/AA.
+                #     Fix: set boost_ha_on_pending_f0=True after CC. On the first F0
+                #     clear the flag without TX. From the second F0 onward send normally.
                 #     Evidence: bug_9 (18s=1×sendInterval → BB),
                 #               bug_10 (31s=2×sendInterval → CC).
                 #
-                #   Guard B — erstes D-Frame nach Boost OFF CC:
-                #     Analog: nach CC auf Boost OFF schläft das Gerät direkt nach
-                #     dem TX wieder ein. Der erste D-Frame danach hat kein Fenster
-                #     → Boost ON jetzt → BB.
-                #     Fix: boost_off_cooldown=True nach CC auf Boost OFF.
-                #     Auf dem ersten D-Frame das Flag löschen ohne TX.
-                #     Ab dem zweiten D-Frame normal senden.
-                #     Evidence: bug_10 (D1 17s nach Boost-OFF CC → BB).
+                #   Guard B — first D-frame after Boost OFF CC:
+                #     Analogously: after CC on Boost OFF the device immediately goes
+                #     to sleep after TX. The first D-frame after that has no window
+                #     → sending Boost ON now → BB.
+                #     Fix: set boost_off_cooldown=True after CC on Boost OFF.
+                #     On the first D-frame clear the flag without TX.
+                #     From the second D-frame onward send normally.
+                #     Evidence: bug_10 (D1 17s after Boost-OFF CC → BB).
 
                 boost_off_now_pending = state.boost_deactivating or (
                     "boostActive" in state.hsa_pending
@@ -600,7 +606,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                                 state.status.desired_temp = float(new_val)
                             except (TypeError, ValueError):
                                 pass
-                    asyncio.create_task(
+                    self.hass.async_create_task(
                         self._send_hsa_if_pending(device_code, device_readings_snapshot)
                     )
 
@@ -661,7 +667,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Update last_seen
         state = self.data.devices.get(event.device_code)
         if state:
-            state.last_seen = datetime.now().isoformat(timespec="seconds")
+            state.last_seen = dt_util.now().isoformat(timespec="seconds")
 
         # Fire HA event for binary_sensor.py and automations
         self.hass.bus.async_fire(
@@ -721,11 +727,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if weather.wind is not None:
             r["wind"] = weather.wind
 
-        state.last_seen = datetime.now().isoformat(timespec="seconds")
-        # FHEM: RemoveInternalTimer on status receipt — cancel pending fallback poll.
-        state = self.data.devices.get(device_code.hex)
-        if state:
-            self._cancel_status_timeout(state)
+        state.last_seen = dt_util.now().isoformat(timespec="seconds")
+        # Cancel any pending status timeout — FHEM: RemoveInternalTimer on receipt.
+        # state is guaranteed non-None here (checked above), no second lookup needed.
+        self._cancel_status_timeout(state)
         self.async_set_updated_data(self.data)
 
     def _handle_battery_status(self, frame: bytearray) -> None:
@@ -744,7 +749,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
 
     def _handle_cmd_ack(self, frame: bytearray) -> None:
-        """#ACK, Befehl vom Aktor empfangen (810003CC).
+        """Handle ACK frame: command received by actor (810003CC).
 
         From 30_DUOFERN.pm: after ACK, send STATUS_RETRY_COUNT status requests
         to get the updated state quickly.
@@ -771,7 +776,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if device_code.device_type == 0xE1:
             return
         # Cover devices send their own status frame when movement ends —
-        # no polling needed.
+        # no polling needed. Polling immediately after CC returns the current
+        # (pre-movement) position, which would wipe the optimistic moving state.
         if device_code.is_cover:
             return
         # FHEM: InternalTimer(+60s, DUOFERN_StatusTimeout, count=4)
@@ -780,7 +786,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._start_status_timeout(device_code)
 
     def _handle_missing_ack(self, frame: bytearray) -> None:
-        """#NACK, Befehl nicht vom Aktor empfangen (810108AA).
+        """Handle NACK frame: command not received by actor (810108AA).
 
         Mark device as unavailable — it will recover on next successful status.
         For 0xE1: NO status requests, NO unfreeze TX. Confirmed: the stick
@@ -798,12 +804,35 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._start_status_timeout(device_code)
 
     def _handle_not_initialized(self) -> None:
-        """#NACK, Aktor nicht initialisiert (81010C55).
+        """Handle NACK 'actor not initialized' frame (81010C55).
 
         From 30_DUOFERN.pm: trigger reconnect.
+        Guard against multiple parallel reconnect tasks: if the stick sends
+        several NOT_INITIALIZED frames in quick succession, only one reconnect
+        task is started. The flag is cleared in _reconnect() when done.
         """
+        if self._reconnecting:
+            _LOGGER.debug("Reconnect already in progress, ignoring NOT_INITIALIZED")
+            return
         _LOGGER.warning("Stick reports NOT INITIALIZED — scheduling reconnect")
-        asyncio.create_task(self._reconnect())
+        self._reconnecting = True
+        self.hass.async_create_task(self._reconnect())
+
+    def _on_stick_queue_error(self, exc: Exception) -> None:
+        """Handle an unexpected crash of the stick's send queue task.
+
+        Called by DuoFernStick._on_queue_task_done when the _process_send_queue
+        coroutine raises an unhandled exception. Triggers a reconnect via the
+        same guard-protected path as NOT_INITIALIZED NACK frames.
+        """
+        _LOGGER.error(
+            "DuoFern stick send queue crashed: %s — scheduling reconnect", exc
+        )
+        if self._reconnecting:
+            _LOGGER.debug("Reconnect already in progress, ignoring queue crash")
+            return
+        self._reconnecting = True
+        self.hass.async_create_task(self._reconnect())
 
     def _handle_unknown_ack(self, frame: bytearray) -> None:
         """Handle unexpected 0x81 response that is not CC / AA / 55.
@@ -867,7 +896,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 # After BB the stick stops forwarding RX until the next TX.
                 # The device is already sleeping so this TX will get AA — that's fine.
                 # We just need any TX to unfreeze the stick so the organic D3 gets through.
-                asyncio.create_task(self._send_stick_unfreeze(device_code))
+                self.hass.async_create_task(self._send_stick_unfreeze(device_code))
                 return
             self._schedule_hsa_update(device_code, "boostActive", retry_val)
         if device_code.device_type == 0xE1:
@@ -890,7 +919,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if state is None:
             return
         self._cancel_status_timeout(state)
-        state.status_timeout_task = asyncio.create_task(
+        state.status_timeout_task = self.hass.async_create_task(
             self._status_timeout_loop(device_code)
         )
 
@@ -951,7 +980,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         _LOGGER.info("Device paired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
-            state.last_paired = datetime.now().isoformat(timespec="seconds")
+            state.last_paired = dt_util.now().isoformat(timespec="seconds")
         else:
             # This is a brand-new device not yet in our paired list.
             # Notify __init__.py so it can persist the code into the config
@@ -970,7 +999,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         _LOGGER.info("Device unpaired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
-            state.last_unpaired = datetime.now().isoformat(timespec="seconds")
+            state.last_unpaired = dt_util.now().isoformat(timespec="seconds")
         self.async_set_updated_data(self.data)
 
     # ------------------------------------------------------------------
@@ -999,11 +1028,18 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         await self._stick.send_command(frame)
 
     async def _reconnect(self) -> None:
-        """Reconnect the stick after NOT_INITIALIZED NACK."""
-        _LOGGER.info("Reconnecting DuoFern stick...")
-        if self._stick:
-            await self._stick.disconnect()
-        await self.async_connect()
+        """Reconnect the stick after NOT_INITIALIZED NACK.
+
+        Clears _reconnecting flag on exit so future NOT_INITIALIZED frames
+        can trigger a new reconnect if needed.
+        """
+        try:
+            _LOGGER.info("Reconnecting DuoFern stick...")
+            if self._stick:
+                await self._stick.disconnect()
+            await self.async_connect()
+        finally:
+            self._reconnecting = False
 
     async def _pairing_countdown(self, duration: int) -> None:
         """Countdown timer for pairing/unpairing UI."""
@@ -1032,7 +1068,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.pairing_active = True
         self.data.pairing_remaining = duration
         self.async_set_updated_data(self.data)
-        self._pairing_task = asyncio.create_task(self._pairing_countdown(duration))
+        self._pairing_task = self.hass.async_create_task(
+            self._pairing_countdown(duration)
+        )
         _LOGGER.info("Pairing started (%ds)", duration)
 
     async def async_stop_pairing(self) -> None:
@@ -1055,7 +1093,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.unpairing_active = True
         self.data.pairing_remaining = duration
         self.async_set_updated_data(self.data)
-        self._unpairing_task = asyncio.create_task(self._pairing_countdown(duration))
+        self._unpairing_task = self.hass.async_create_task(
+            self._pairing_countdown(duration)
+        )
         _LOGGER.info("Unpairing started (%ds)", duration)
 
     async def async_stop_unpairing(self) -> None:
@@ -1298,12 +1338,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             "10minuteAlarm": ("081700FD000000000000", "081700FE000000000000"),
             "2000cycleAlarm": ("081900FD000000000000", "081900FE000000000000"),
             "backJump": ("081B00FD000000000000", "081B00FE000000000000"),
+            # modeChange and reversal both send the same toggle command regardless
+            # of on/off — the device has no separate on/off for these flags,
+            # only a toggle. TODO: capture OTA frames to verify if separate
+            # on/off commands exist in the original Rademacher firmware.
             "modeChange": ("070C0000000000000000", "070C0000000000000000"),  # toggle
             "windMode": ("070D01FF000000000000", "070E0100000000000000"),
             "rainMode": ("071101FF000000000000", "07120100000000000000"),
             "reversal": ("070C0000000000000000", "070C0000000000000000"),  # toggle only
             "intermediateMode": ("080200FD000000000000", "080200FE000000000000"),
-            "modeChange": ("070C0000000000000000", "070C0000000000000000"),  # toggle
         }
         cmd_pair = AUTOMATION_COMMANDS.get(name)
         if cmd_pair is None:
@@ -1898,8 +1941,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
 
-        # HomePilot sendet nur wenn pending vorhanden. sv=0 auf normalem D3 → BB.
-        # Boost-Frame hat Vorrang — kein zweiter Frame danach.
+        # Send HSA frame only if something is pending (mirrors HomePilot behavior).
+        # sv=0 on a plain D3 with nothing pending → BB. Boost frame takes priority,
+        # no second frame is sent after it.
         sent_boost = boost_active_val is not None or boost_duration_val is not None
         force_response = state.status.readings.get("forceResponse", 0)
         if not sent_boost and (set_value > 0 or int(force_response or 0) > 0):
@@ -1975,7 +2019,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             self._schedule_hsa_update(device_code, "boostDuration", duration)
             self._schedule_hsa_update(device_code, "boostActive", "on")
             if state is not None:
-                state.boost_start = datetime.now()
+                state.boost_start = dt_util.now()
         else:
             self._schedule_hsa_update(device_code, "boostActive", "off")
 
@@ -2123,9 +2167,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           time => $duoSetTime = "0D0110800001mmmmmmmmnnnnnn0000000000yyyyyy00"
           where mm=date (year,month,weekday,day) and nn=time (hour,min,sec)
         """
-        import datetime
-
-        now = datetime.datetime.now()
+        now = dt_util.now()  # uses dt_util.now() for timezone-aware local time
         wday = now.weekday()  # 0=Mon, already matches FHEM after their adjustment
         mm = f"{now.year - 2000:02x}{now.month:02x}{wday:02x}{now.day:02x}"
         nn = f"{now.hour:02x}{now.minute:02x}{now.second:02x}"

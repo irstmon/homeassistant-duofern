@@ -825,7 +825,9 @@ class DuoFernDecoder:
         f = DuoFernDecoder._ensure_bytes(data)
         if len(f) < 4:
             return False
-        if f[3] == 0x2A:  # Gerät-ACK nach Boost — ignorieren (NOTES.md: "nicht parsen")
+        if (
+            f[3] == 0x2A
+        ):  # Device-ACK after boost — ignore (not a parseable status frame)
             return False
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 

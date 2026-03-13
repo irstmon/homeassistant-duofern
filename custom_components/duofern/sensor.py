@@ -52,6 +52,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         key="brightness",
         reading_key="brightness",
         translation_key="brightness",
-        name="Helligkeit",
+        name="Brightness",
         device_class=SensorDeviceClass.ILLUMINANCE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="lx",
@@ -79,7 +80,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         key="temperature",
         reading_key="temperature",
         translation_key="temperature",
-        name="Temperatur",
+        name="Temperature",
         device_class=SensorDeviceClass.TEMPERATURE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -88,7 +89,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         key="wind",
         reading_key="wind",
         translation_key="wind_speed",
-        name="Wind",
+        name="Wind Speed",
         device_class=SensorDeviceClass.WIND_SPEED,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="m/s",
@@ -97,7 +98,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         key="sunDirection",
         reading_key="sunDirection",
         translation_key="sun_direction",
-        name="Sonnenrichtung",
+        name="Sun Direction",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="°",
         icon="mdi:sun-compass",
@@ -106,7 +107,7 @@ SENSOR_DESCRIPTIONS: tuple[DuoFernSensorDescription, ...] = (
         key="sunHeight",
         reading_key="sunHeight",
         translation_key="sun_height",
-        name="Sonnenhöhe",
+        name="Sun Height",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="°",
         icon="mdi:weather-sunny",
@@ -595,7 +596,6 @@ class DuoFernLastSeenSensor(
         ):
             try:
                 # HA stores timestamps as ISO 8601 with timezone info
-                from homeassistant.util import dt as dt_util
 
                 self._restored_value = dt_util.parse_datetime(last_state.state)
             except (ValueError, TypeError):
@@ -619,12 +619,13 @@ class DuoFernLastSeenSensor(
             return self._restored_value
 
         try:
-            from homeassistant.util import dt as dt_util
-
-            # last_seen is stored as ISO string without timezone — treat as local
-            naive = datetime.fromisoformat(state.last_seen)
-            aware = dt_util.as_local(naive)
-            return aware
+            # last_seen is stored as ISO string from dt_util.now() — already
+            # timezone-aware. fromisoformat handles both aware and naive strings.
+            parsed = datetime.fromisoformat(state.last_seen)
+            if parsed.tzinfo is None:
+                # Defensive fallback: if somehow stored without timezone, treat as local
+                return parsed.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+            return parsed
         except (ValueError, TypeError):
             return self._restored_value
 
@@ -687,8 +688,6 @@ class DuoFernBoostStartSensor(
             "unavailable",
         ):
             try:
-                from homeassistant.util import dt as dt_util
-
                 self._restored_value = dt_util.parse_datetime(last_state.state)
             except (ValueError, TypeError):
                 pass
@@ -710,13 +709,12 @@ class DuoFernBoostStartSensor(
         if state is None or state.boost_start is None:
             return self._restored_value
 
-        from homeassistant.util import dt as dt_util
-
-        naive = state.boost_start
-        # boost_start is stored as naive local datetime — make timezone-aware
-        if naive.tzinfo is None:
-            return dt_util.as_local(naive)
-        return naive
+        # boost_start is stored as timezone-aware datetime from dt_util.now().
+        # Defensive fallback for any legacy naive values still in memory.
+        ts = state.boost_start
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
+        return ts
 
     @callback
     def _handle_coordinator_update(self) -> None:

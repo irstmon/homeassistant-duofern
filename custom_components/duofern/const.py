@@ -156,6 +156,24 @@ COVER_DEVICE_TYPES: Final[set[int]] = (
     | COVER_DEVICE_TYPES_FORMAT24
 )
 
+# All cover device types as a flat set — used in number.py and switch.py to
+# filter which entities apply to cover devices. Defined here to avoid duplication.
+ALL_COVER_TYPES: Final[frozenset[int]] = frozenset(COVER_DEVICE_TYPES)
+
+# Cover types that have the Troll/Rohrmotor feature set (running time,
+# obstacle detection support, motor-specific number entities).
+# Used in number.py and switch.py — defined here to avoid duplication.
+TROLL_COVER_TYPES: Final[frozenset[int]] = frozenset(
+    {
+        0x42,  # Rohrmotor-Aktor
+        0x47,  # Rohrmotor Steuerung
+        0x49,  # Rohrmotor
+        0x4B,  # Connect-Aktor
+        0x4C,  # Troll Basis
+        0x70,  # Troll Comfort DuoFern
+    }
+)
+
 # Dimmers / lights (level 0-100, on/off) — Format "25" / "2B"
 LIGHT_DEVICE_TYPES: Final[set[int]] = {
     0x48,  # Dimmaktor
@@ -178,17 +196,28 @@ CLIMATE_DEVICE_TYPES: Final[set[int]] = {
 
 # Binary sensors (motion, smoke, door/window contact)
 BINARY_SENSOR_DEVICE_TYPES: Final[set[int]] = {
-    0x65,  # Bewegungsmelder
-    0xAB,  # Rauchmelder
-    0xAC,  # Fenster-Tuer-Kontakt
+    0x65,  # Motion detector
+    0xAB,  # Smoke detector
+    0xAC,  # Window/door contact sensor
 }
 
-# Weather / environment sensors
+# Weather / environment sensors that send full weather data frames (0F..1322).
+# Only 0x69 (Umweltsensor / weather station) actually transmits these frames.
+# All 5 sensor entities (brightness, temperature, wind, sunDirection, sunHeight)
+# are created exclusively for this type.
 SENSOR_DEVICE_TYPES: Final[set[int]] = {
-    0x69,  # Umweltsensor
+    0x69,  # Umweltsensor (weather station) — sends full weather data frames
+}
+
+# Sun/wind sensor devices that send ONLY sensorMsg events (startSun/endSun/
+# startWind/endWind) — they do NOT send weather data frames (0F..1322).
+# These devices are represented via binary_sensor.py (sun/wind events) only.
+# Creating numeric sensor entities for these types would result in permanently
+# unavailable entities because reading_key never appears in status.readings.
+EVENT_ONLY_SENSOR_TYPES: Final[set[int]] = {
     0xA5,  # Sonnensensor
     0xA9,  # Sonnen-/Windsensor
-    0xAA,  # Markisenwaechter
+    0xAA,  # Markisenwaechter (wind guard for awnings)
     0xAF,  # Sonnensensor (alternate model)
 }
 
@@ -218,16 +247,22 @@ WIND_SENSOR_DEVICE_TYPES: Final[set[int]] = {
     0xAA,  # Markisenwaechter
 }
 
-# Remote controls / wall buttons — fire HA events, no persistent state
+# Remote controls / wall buttons / timers — fire HA events, no persistent state.
+# These devices only send events (button presses, timer triggers) and never
+# respond to commands. They get EventEntity + device triggers but NO actor buttons.
+# 0xA8 HomeTimer and 0xE0 Handzentrale are included here because they fire
+# duofern_event on the HA event bus just like all other remotes.
 REMOTE_DEVICE_TYPES: Final[set[int]] = {
-    0xA0,  # Handsender (6 Gruppen-48 Geraete)
-    0xA1,  # Handsender (1 Gruppe-48 Geraete)
-    0xA2,  # Handsender (6 Gruppen-1 Geraet)
-    0xA3,  # Handsender (1 Gruppe-1 Geraet)
-    0xA4,  # Wandtaster
-    0xA7,  # Funksender UP
-    0x74,  # Wandtaster 6fach 230V     (has channel 01)
-    0xAD,  # Wandtaster 6fach Bat
+    0xA0,  # Handsender (6 groups, 48 devices)
+    0xA1,  # Handsender (1 group, 48 devices)
+    0xA2,  # Handsender (6 groups, 1 device)
+    0xA3,  # Handsender (1 group, 1 device)
+    0xA4,  # Wandtaster (wall button)
+    0xA7,  # Funksender UP (wireless transmitter)
+    0xA8,  # HomeTimer — fires events, listed in README as duofern_event source
+    0x74,  # Wandtaster 6fach 230V (has channel 01)
+    0xAD,  # Wandtaster 6fach Bat (battery-powered wall button)
+    0xE0,  # Handzentrale — fires events, listed in README as duofern_event source
 }
 
 # ---------------------------------------------------------------------------
@@ -238,8 +273,12 @@ REMOTE_DEVICE_TYPES: Final[set[int]] = {
 
 DEVICE_CHANNELS: Final[dict[int, list[str]]] = {
     0x43: ["01", "02"],  # Universalaktor:   channel 01 and 02
-    0x65: ["01"],  # Bewegungsmelder:  channel 01
-    0x69: ["01"],  # Umweltsensor:     channel 01 (actor sub-device)
+    0x65: ["01"],  # Motion detector:  channel 01
+    # 0x69 Umweltsensor has two sub-channels:
+    #   "00" = weather station channel (getWeather / getTime / config buttons)
+    #   "01" = actor channel (automation/heating outputs)
+    # Both must be registered so that the correct entities are created for each.
+    0x69: ["00", "01"],  # Umweltsensor: channel 00 (weather station) + 01 (actor)
     0x74: ["01"],  # Wandtaster 6fach: channel 01
 }
 

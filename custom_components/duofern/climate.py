@@ -204,12 +204,16 @@ class DuoFernClimate(
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode.
 
-        Uses target_temperature (which already includes restored fallback)
-        so the mode is consistent with what the GUI shows.
+        Derived exclusively from live device data (state.status.desired_temp),
+        NOT from the restored fallback (self._restored_desired_temp).
+        Reason: the default restored value is TEMP_MIN (4.0°C), which would
+        incorrectly show HVACMode.OFF on startup even if the device is actively
+        heating. We return HEAT as the safe default until a live frame arrives.
         """
-        desired = self.target_temperature
-        if desired is not None and desired <= TEMP_MIN:
-            return HVACMode.OFF
+        state = self._device_state
+        if state is not None and state.status.desired_temp is not None:
+            if state.status.desired_temp <= TEMP_MIN:
+                return HVACMode.OFF
         return HVACMode.HEAT
 
     @property

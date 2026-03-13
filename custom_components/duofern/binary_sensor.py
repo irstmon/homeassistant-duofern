@@ -3,33 +3,37 @@
 Two types of binary sensor entities are created:
 
 1. Event-based sensors (motion, smoke, contact):
-   Devices: 0x65 Bewegungsmelder, 0xAB Rauchmelder, 0xAC Fenster-Tuer-Kontakt
+   Devices: 0x65 motion detector, 0xAB smoke detector, 0xAC window/door contact
    These fire sensor events and are updated via the duofern_event bus.
 
    From 30_DUOFERN.pm %sensorMsg:
-     0720 startMotion  -> True    (Bewegungsmelder)
+     0720 startMotion  -> True    (motion detector)
      0721 endMotion    -> False
-     071E startSmoke   -> True    (Rauchmelder)
+     071E startSmoke   -> True    (smoke detector)
      071F endSmoke     -> False
-     0723 opened       -> True    (Fensterkontakt)
+     0723 opened       -> True    (window/door contact)
      0724 closed       -> False
      0725 startVibration -> True
      0726 endVibration   -> False
 
-2. Status-based obstacle sensors (SX5 garage door only):
-   Device: 0x4E SX5
-   These are read from each status frame and create three separate entities:
+2. Status-based obstacle sensors (Rohrmotor 0x49 and SX5 0x4E):
+   Devices: 0x49 Rohrmotor, 0x4E SX5 garage door (OBSTACLE_COVER_TYPES in const.py)
+   These are read from each status frame. Both devices create obstacle and block
+   entities. lightCurtain is additionally created for the SX5 (0x4E) only,
+   since only format 24a includes the lightCurtain reading.
+   Three entity types:
      - obstacle      (BinarySensorDeviceClass.PROBLEM)
      - block         (BinarySensorDeviceClass.PROBLEM)
-     - lightCurtain  (BinarySensorDeviceClass.SAFETY)
+     - lightCurtain  (BinarySensorDeviceClass.SAFETY) — SX5 only
 
    These are FULLY TRIGGERABLE in HA automations:
      Trigger type: State
      Entity: "DuoFern SX5 (xxxxxx) — Obstacle" / "Block" / "Light Curtain"
 
-   From 30_DUOFERN.pm format "24a" (SX5):
-     obstacle, block, lightCurtain in %statusIds.
-     When obstacle/block is set, the garage door has detected an obstruction.
+   From 30_DUOFERN.pm format "24" (Rohrmotor) and "24a" (SX5):
+     obstacle, block in %statusIds for both.
+     lightCurtain only in format 24a (SX5).
+     When obstacle/block is set, the motor has detected an obstruction.
 """
 
 from __future__ import annotations
@@ -61,15 +65,19 @@ _EVENT_TO_STATE: dict[str, bool] = {
     "endMotion": False,
     "startSmoke": True,
     "endSmoke": False,
-    "startRain": True,
-    "endRain": False,
+    # NOTE: startRain/endRain are intentionally NOT included here.
+    # Rain events come from the Umweltsensor (0x69) which is NOT a
+    # DuoFernBinarySensor device type (0x65/0xAB/0xAC). If a dedicated
+    # rain binary sensor for the Umweltsensor is added in the future,
+    # startRain/endRain should be handled in that class, not here.
+    # TODO: Add DuoFernRainSensor for 0x69 when Umweltsensor support is complete.
     "startSun": True,
     "endSun": False,
     "startWind": True,
     "endWind": False,
     "startVibration": True,
     "endVibration": False,
-    "opened": True,  # Fensterkontakt: open = True
+    "opened": True,  # window/door contact: open = True
     "closed": False,
 }
 
@@ -416,8 +424,10 @@ class DuoFernBinarySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernWindowSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity):
-    """A single binary sensor for the DuoFern Fenster-Tuer-Kontakt (0xAC).
+class DuoFernWindowSensor(
+    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
+):
+    """A single binary sensor for the DuoFern window/door contact sensor (0xAC).
 
     Two instances are created per device:
       - "opened":  on=True only for 'opened' event  (FHEM state 'on')
@@ -427,6 +437,11 @@ class DuoFernWindowSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEnt
       0723 opened  -> state="on"     (sensorMsg)
       0724 closed  -> state="off"    (sensorMsg)
       AC + byte14=FE -> state="tilted"
+
+    RestoreEntity is used because the 0xAC contact sensor is battery-powered
+    and only sends events (no periodic status frames). Without state restore,
+    HA always shows "closed" after a restart until the next event arrives —
+    which could be hours if the window/door remains in the same state.
     """
 
     _attr_has_entity_name = True
@@ -457,8 +472,26 @@ class DuoFernWindowSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEnt
         self._is_on: bool = False
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to DuoFern events on the HA event bus."""
+        """Subscribe to DuoFern events and restore last known state."""
         await super().async_added_to_hass()
+
+        # Restore last known state so we don't show "closed" incorrectly
+        # after a restart while the window/door is still open/tilted.
+        # The 0xAC contact sensor is battery-powered and only sends events,
+        # so without restore HA would show the wrong state for hours.
+        last_state = await self.async_get_last_state()
+        if last_state is not None and last_state.state not in (
+            "unknown",
+            "unavailable",
+        ):
+            self._is_on = last_state.state == "on"
+            _LOGGER.debug(
+                "WindowSensor %s (%s): restored state=%s",
+                self._hex_code,
+                self._sensor_type,
+                last_state.state,
+            )
+
         self.async_on_remove(
             self.hass.bus.async_listen(DUOFERN_EVENT, self._handle_duofern_event)
         )

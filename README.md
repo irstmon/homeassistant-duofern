@@ -126,7 +126,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
   `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `sendingInterval`
 - **Valve Position sensor** — dedicated sensor entity (0–100 %) for the Heizkörperantrieb (`0xE1`), visible on the device card
 - **Battery sensor** — dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
-- **Window Open switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C). The switch reflects the **live device state** — the device echoes the last-set value back in every status frame
+- **Window Open Signal switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C). The switch reflects the **live device state** — the device echoes the last-set value back in every status frame
 - **Boost Mode** — rapidly heats a room by fully opening the valve for a configurable duration:
   - **Boost switch** — activates / deactivates boost mode
   - **Boost Duration number** (4–60 min) — configure the duration before activating; moving the slider alone sends nothing to the device
@@ -155,7 +155,7 @@ The SX5 garage door (0x4E) additionally gets:
 |--------|-------------|----------------|
 | Light Curtain | `safety` | The safety light curtain is active |
 
-Devices with obstacle detection: Rohrmotor-Aktor (`0x42`), Rohrmotor Steuerung (`0x47`), Rohrmotor (`0x49`), Connect-Aktor (`0x4B`), Troll Basis (`0x4C`), SX5 (`0x4E`), Troll Comfort DuoFern (`0x70`).
+Devices with confirmed obstacle detection: Rohrmotor (`0x49`), SX5 (`0x4E`). Other cover types (Rohrmotor-Aktor `0x42`, Connect-Aktor `0x4B`, Troll Basis `0x4C`, Troll Comfort `0x70`) may support obstacle/block but are unverified — open an issue if your device reports these in FHEM.
 
 These entities are **fully triggerable** in HA automations as State triggers — see the [Automations](#automations) section.
 
@@ -176,11 +176,11 @@ One sensor entity per measurement:
 
 | Sensor | Unit | Device Class |
 |--------|------|-------------|
-| Helligkeit (Brightness) | lux | `illuminance` |
-| Temperatur | °C | `temperature` |
-| Wind | m/s | `wind_speed` |
-| Sonnenrichtung (Sun Direction) | ° | — |
-| Sonnenhöhe (Sun Elevation) | ° | — |
+| Brightness (Helligkeit) | lux | `illuminance` |
+| Temperature (Temperatur) | °C | `temperature` |
+| Wind Speed | m/s | `wind_speed` |
+| Sun Direction (Sonnenrichtung) | ° | — |
+| Sun Height (Sonnenhöhe) | ° | — |
 
 ### Stick Control Buttons
 

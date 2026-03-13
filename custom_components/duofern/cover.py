@@ -70,7 +70,14 @@ from .protocol import DuoFernId
 _LOGGER = logging.getLogger(__name__)
 
 # Readings exposed as first-class HA properties — skip from extra_state_attributes
-_SKIP_AS_ATTRIBUTE = {"position", "moving"}
+# Keys that are exposed as dedicated HA entities and must NOT also appear
+# as extra_state_attributes on the cover — to avoid showing the same value twice.
+# - position/moving: handled by CoverEntity properties (current_cover_position,
+#   is_opening/is_closing)
+# - obstacle/block/lightCurtain: handled by dedicated BinarySensorEntity instances
+#   in binary_sensor.py — showing them here as well would create duplicate entries
+#   on the device card.
+_SKIP_AS_ATTRIBUTE = {"position", "moving", "obstacle", "block", "lightCurtain"}
 
 
 async def async_setup_entry(
@@ -88,7 +95,6 @@ async def async_setup_entry(
                 DuoFernCover(
                     coordinator=coordinator,
                     device_code=device_state.device_code,
-                    entry_id=entry.entry_id,
                 )
             )
             _LOGGER.debug("Adding cover entity for device %s", hex_code)
@@ -126,7 +132,6 @@ class DuoFernCover(CoordinatorEntity[DuoFernCoordinator], CoverEntity):
         self,
         coordinator: DuoFernCoordinator,
         device_code: DuoFernId,
-        entry_id: str,
     ) -> None:
         """Initialize the cover entity."""
         super().__init__(coordinator)
@@ -239,7 +244,8 @@ class DuoFernCover(CoordinatorEntity[DuoFernCoordinator], CoverEntity):
                       defaultSlatPos
           Format 24a (SX5): automaticClosing, openSpeed, 2000cycleAlarm,
                       wicketDoor, backJump, 10minuteAlarm, light
-                      [obstacle/block/lightCurtain are separate binary_sensors]
+                      [obstacle/block/lightCurtain are excluded — they have
+                       dedicated BinarySensorEntity instances in binary_sensor.py]
         """
         state = self._device_state
         if state is None:
