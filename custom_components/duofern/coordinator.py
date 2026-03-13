@@ -1730,7 +1730,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         # Store old value only the first time (FHEM: if(!exists HSAold{key}))
         if key not in state.hsa_pending:
-            old_val = state.status.readings.get(key, 0)
+            old_val = state.status.readings.get(
+                key
+            )  # None = not yet received (distinct from 0)
             state.hsa_pending[key] = (old_val, new_value)
         else:
             # Already pending — just update the target value, keep old_val
@@ -1805,7 +1807,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
             # changeFlag=1 if device value matches what it was when user set,
             # meaning the device hasn't changed independently — safe to apply.
-            if key == "windowContact" or str(old_val) == str(is_value):
+            if (
+                key == "windowContact"
+                or old_val is None
+                or str(old_val) == str(is_value)
+            ):
                 change_flag = 1
             else:
                 change_flag = 0
@@ -1998,7 +2004,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm %commandsHSA:
           sendingInterval: bitFrom=0, changeFlag=7, min=0, max=60, step=1
         """
-        clamped = max(2, min(60, value))  # UI min=2, never send 0 or 1
+        clamped = int(
+            round(max(2, min(60, value)))
+        )  # UI min=2; int() guards against float from number entity
         self._schedule_hsa_update(device_code, "sendingInterval", clamped)
 
     async def async_set_boost(self, device_code: DuoFernId, enable: bool) -> None:
@@ -2032,7 +2040,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         transmitted to the device when async_set_boost(enable=True) is called.
         Moving the slider must never cause a duoSetHSA to be queued or sent.
         """
-        clamped = max(4, min(60, value))
+        clamped = int(
+            round(max(4, min(60, value)))
+        )  # int() guards against float from number entity
         state = self.data.devices.get(device_code.hex)
         if state is None:
             return

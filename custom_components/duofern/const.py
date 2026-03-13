@@ -160,8 +160,9 @@ COVER_DEVICE_TYPES: Final[set[int]] = (
 # filter which entities apply to cover devices. Defined here to avoid duplication.
 ALL_COVER_TYPES: Final[frozenset[int]] = frozenset(COVER_DEVICE_TYPES)
 
-# Cover types that have the Troll/Rohrmotor feature set (running time,
-# obstacle detection support, motor-specific number entities).
+# Cover types that have the Troll/Rohrmotor motor feature set: running time,
+# wind/rain automatic, motor dead time, reversal, and motor-specific number/switch
+# entities. Note: obstacle detection is a separate concern — see OBSTACLE_COVER_TYPES.
 # Used in number.py and switch.py — defined here to avoid duplication.
 TROLL_COVER_TYPES: Final[frozenset[int]] = frozenset(
     {
@@ -209,20 +210,15 @@ SENSOR_DEVICE_TYPES: Final[set[int]] = {
     0x69,  # Umweltsensor (weather station) — sends full weather data frames
 }
 
-# Sun/wind sensor devices that send ONLY sensorMsg events (startSun/endSun/
-# startWind/endWind) — they do NOT send weather data frames (0F..1322).
-# These devices are represented via binary_sensor.py (sun/wind events) only.
-# Creating numeric sensor entities for these types would result in permanently
-# unavailable entities because reading_key never appears in status.readings.
-EVENT_ONLY_SENSOR_TYPES: Final[set[int]] = {
-    0xA5,  # Sonnensensor
-    0xA9,  # Sonnen-/Windsensor
-    0xAA,  # Markisenwaechter (wind guard for awnings)
-    0xAF,  # Sonnensensor (alternate model)
-}
-
 # Dedicated external environmental sensor devices (A5/AF/A9/AA).
 # These send sun/wind events and are registered as standalone HA devices.
+# IMPORTANT: These devices do NOT send weather data frames (0F..1322) — they
+# only send sensorMsg events (startSun/endSun/startWind/endWind). Creating
+# numeric sensor entities (brightness, temperature, wind, sunDirection,
+# sunHeight) for these types would result in permanently unavailable entities
+# because reading_key never appears in status.readings. Only 0x69 gets those.
+# (See Bug 6 from the 2026-03-12 review: previously these were incorrectly
+# included in SENSOR_DEVICE_TYPES, causing 5 phantom entities per device.)
 # Note: 0x61 RolloTron Comfort Master also sends sun events but is already
 # registered as a Cover — it gets an additional binary_sensor entity instead.
 # From 30_DUOFERN.pm: none of these have get/set commands.
