@@ -405,6 +405,15 @@ Implementation based on `10_DUOFERNSTICK.pm` and `30_DUOFERN.pm` from the FHEM p
 
 ---
 
+## AI disclaimer
+Yes, this project does make use of LLMs and coding agents, and this will likely continue going forward. AI is integrated deliberately and with care.
+
+If you use AI tools, please do so responsibly and transparently.
+
+On a personal note: the use of AI tools doesn’t mean this project was quick or effortless to build. A lot of time and dedication went into it.
+
+---
+
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
