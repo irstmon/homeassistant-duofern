@@ -9,8 +9,9 @@
     "usb"
   ],
   "documentation": "https://github.com/irstmon/homeassistant-duofern",
-  "issue_tracker": "https://github.com/irstmon/homeassistant-duofern/issues",
+  "integration_type": "hub",
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/irstmon/homeassistant-duofern/issues",
   "requirements": [
     "pyserial-asyncio-fast==0.16"
   ],
