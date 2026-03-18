@@ -57,6 +57,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import translation
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -1199,6 +1200,23 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         finally:
             self._pending_pair_future = None
 
+        # Load translations for notification messages.
+        strings = await translation.async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", {DOMAIN}
+        )
+
+        def _t(key: str, **kwargs: object) -> str:
+            """Fetch translated notification message from exceptions block."""
+            raw = strings.get(f"component.{DOMAIN}.exceptions.{key}.message", "")
+            return raw.format(**kwargs) if raw else ""
+
+        def _title(key: str) -> str:
+            """Fetch translated notification title from exceptions block."""
+            return strings.get(
+                f"component.{DOMAIN}.exceptions.{key}_title.message",
+                "DuoFern: Pair by Code",
+            )
+
         if result == "CC":
             _LOGGER.info(
                 "remotePair CC from %s — persisting and reloading", device_code_hex
@@ -1217,27 +1235,39 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 )
             return {
                 "success": True,
-                "message": f"Device {device_code_hex} paired successfully.",
+                "title": _title("pair_success"),
+                "message": _t("pair_success", device_code=device_code_hex)
+                or f"Device {device_code_hex} paired successfully.",
                 "device_code": device_code_hex,
             }
 
         if result == "AA":
             return {
                 "success": False,
-                "message": f"Device {device_code_hex} did not respond (AA). Ensure it is powered on and in pairing mode.",
+                "title": _title("pair_aa"),
+                "message": _t("pair_aa", device_code=device_code_hex)
+                or f"Device {device_code_hex} did not respond (AA).",
                 "device_code": device_code_hex,
             }
 
         if result == "BB":
             return {
                 "success": False,
-                "message": f"Device {device_code_hex} rejected pairing (BB). It may already be paired to another controller.",
+                "title": _title("pair_bb"),
+                "message": _t("pair_bb", device_code=device_code_hex)
+                or f"Device {device_code_hex} rejected pairing (BB).",
                 "device_code": device_code_hex,
             }
 
         return {
             "success": False,
-            "message": f"Pairing timeout: {device_code_hex} did not respond within {REMOTE_PAIR_TIMEOUT:.0f}s. Check that the device is in pairing mode.",
+            "title": _title("pair_timeout"),
+            "message": _t(
+                "pair_timeout",
+                device_code=device_code_hex,
+                timeout=int(REMOTE_PAIR_TIMEOUT),
+            )
+            or f"Pairing timeout: {device_code_hex} did not respond within {REMOTE_PAIR_TIMEOUT:.0f}s.",
             "device_code": device_code_hex,
         }
 

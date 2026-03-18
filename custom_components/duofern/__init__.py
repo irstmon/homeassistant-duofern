@@ -69,6 +69,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.EVENT,
+    Platform.TEXT,
 ]
 
 SERVICE_PAIR_BY_CODE = "pair_device_by_code"
@@ -147,7 +148,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
                 "persistent_notification",
                 "create",
                 {
-                    "title": "DuoFern: Pair by Code",
+                    "title": result.get("title", "DuoFern: Pair by Code"),
                     "message": result["message"],
                     "notification_id": f"duofern_pair_{result['device_code']}",
                 },

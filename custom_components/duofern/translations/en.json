@@ -113,6 +113,9 @@
       },
       "write_config": {
         "name": "Write Config"
+      },
+      "pair_by_code": {
+        "name": "Pair by Code"
       }
     },
     "binary_sensor": {
@@ -389,6 +392,11 @@
       "boost_started": {
         "name": "Boost Started"
       }
+    },
+    "text": {
+      "pair_code_input": {
+        "name": "Device Code Input"
+      }
     }
   },
   "device_automation": {
@@ -425,6 +433,38 @@
           "description": "6-digit hex code printed on the device label (e.g. \"40AB12\")."
         }
       }
+    }
+  },
+  "exceptions": {
+    "pair_no_input": {
+      "message": "Please enter a valid 6-digit hex device code in the \"Device Code Input\" field first (e.g. 40AB12)."
+    },
+    "pair_no_input_title": {
+      "message": "DuoFern: Pair by Code"
+    },
+    "pair_success": {
+      "message": "Device {device_code} paired successfully."
+    },
+    "pair_success_title": {
+      "message": "DuoFern: Pair by Code"
+    },
+    "pair_aa": {
+      "message": "Device {device_code} did not respond (AA). Ensure it is powered on and in pairing mode (first 2 hours after power-up, or triggered manually)."
+    },
+    "pair_aa_title": {
+      "message": "DuoFern: Pair by Code"
+    },
+    "pair_bb": {
+      "message": "Device {device_code} rejected pairing (BB). It may already be paired to another controller."
+    },
+    "pair_bb_title": {
+      "message": "DuoFern: Pair by Code"
+    },
+    "pair_timeout": {
+      "message": "Pairing timeout: {device_code} did not respond within {timeout}s. Check that the device is in pairing mode."
+    },
+    "pair_timeout_title": {
+      "message": "DuoFern: Pair by Code"
     }
   }
 }
