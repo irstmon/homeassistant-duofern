@@ -808,6 +808,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.warning("Missing ACK from %s — marking unavailable", device_code.hex)
         # Resolve pair-by-code future — device not reachable / not in pair mode (AA).
+        # Use device_code comparison so concurrent AAs from other devices
+        # do not accidentally resolve the future.
         if self._pending_pair_future is not None:
             pair_hex, pair_future = self._pending_pair_future
             if device_code.hex == pair_hex and not pair_future.done():
@@ -874,6 +876,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             return
 
         # Resolve pair-by-code future — device rejected pairing (BB).
+        # Use device_code comparison so concurrent BBs from other devices
+        # do not accidentally resolve the future.
         if self._pending_pair_future is not None:
             pair_hex, pair_future = self._pending_pair_future
             if device_code.hex == pair_hex and not pair_future.done():

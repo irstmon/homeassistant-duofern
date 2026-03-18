@@ -778,4 +778,13 @@ class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
             )
             return
 
-        await self.coordinator.async_pair_device_by_code(device_code)
+        result = await self.coordinator.async_pair_device_by_code(device_code)
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": result.get("title", "DuoFern: Pair by Code"),
+                "message": result["message"],
+                "notification_id": f"duofern_pair_{result['device_code']}",
+            },
+        )
