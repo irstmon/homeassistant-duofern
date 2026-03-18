@@ -414,5 +414,17 @@
       "start": "Start",
       "end": "End"
     }
+  },
+  "services": {
+    "pair_device_by_code": {
+      "name": "Pair device by code",
+      "description": "Pair a DuoFern device using its 6-digit hex code. The device must be in pairing mode. 10-digit (2020+) codes are not supported — pair those via Homepilot first.",
+      "fields": {
+        "device_code": {
+          "name": "Device Code",
+          "description": "6-digit hex code printed on the device label (e.g. \"40AB12\")."
+        }
+      }
+    }
   }
 }

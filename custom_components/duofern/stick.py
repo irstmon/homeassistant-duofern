@@ -31,6 +31,7 @@ from .const import (
     FLUSH_BUFFER_TIMEOUT,
     FRAME_SIZE_BYTES,
     INIT_RETRY_COUNT,
+    REMOTE_PAIR_TIMEOUT,
     SERIAL_BAUDRATE,
 )
 from .protocol import (
@@ -236,11 +237,13 @@ class DuoFernStick:
                 resp = await self._send_and_wait(DuoFernEncoder.build_init1())
                 if resp is None:
                     continue
+                _LOGGER.debug("Init1 response: %s", frame_to_hex(resp))
 
                 # Step 2: Init2
                 resp = await self._send_and_wait(DuoFernEncoder.build_init2())
                 if resp is None:
                     continue
+                _LOGGER.debug("Init2 response: %s", frame_to_hex(resp))
 
                 # Step 3: SetDongle — register our system code with the stick
                 resp = await self._send_and_wait(
@@ -248,12 +251,14 @@ class DuoFernStick:
                 )
                 if resp is None:
                     continue
+                _LOGGER.debug("SetDongle response: %s", frame_to_hex(resp))
                 self._write_frame(DuoFernEncoder.build_ack())
 
-                # Step 4: Init3
+                # Step 4: Init3 — response byte[1]==0x14 confirms FW 2.0
                 resp = await self._send_and_wait(DuoFernEncoder.build_init3())
                 if resp is None:
                     continue
+                _LOGGER.debug("Init3 response (firmware info): %s", frame_to_hex(resp))
                 self._write_frame(DuoFernEncoder.build_ack())
 
                 # Step 5: Register each paired device by index.
@@ -436,18 +441,27 @@ class DuoFernStick:
 
 
 class DuoFernSerialProtocol(asyncio.Protocol):
-    """asyncio.Protocol that accumulates bytes into complete 22-byte frames.
+    """asyncio.Protocol that accumulates bytes into complete frames.
 
     Mirrors DUOFERNSTICK_Read from 10_DUOFERNSTICK.pm:
       - Bytes arrive in arbitrary-sized chunks from the OS
       - Accumulated in a buffer (PARTIAL in FHEM)
-      - Complete 22-byte frames are extracted and dispatched
+      - Complete frames are extracted and dispatched
       - Partial trailing data is flushed after FLUSH_BUFFER_TIMEOUT (safety)
+
+    Frame sizes are variable, looked up by first byte:
+      Default:        22 bytes (FRAME_SIZE_BYTES)
+      Pair response:  38 bytes (0x06, 2020+ protocol)
 
     From 10_DUOFERNSTICK.pm:
       $hash->{PARTIAL} = $duodata; # for recursive calls
-      # Read anstatt input sonst funzt read_const_time nicht.
     """
+
+    # Map first frame byte to expected total frame length.
+    # Bytes not listed fall back to FRAME_SIZE_BYTES (22).
+    _FRAME_SIZES: dict[int, int] = {
+        0x06: 38,  # pair response — 2020+ devices use 38-byte frames
+    }
 
     def __init__(
         self,
@@ -479,31 +493,33 @@ class DuoFernSerialProtocol(asyncio.Protocol):
     def data_received(self, data: bytes) -> None:
         """Called when data arrives from the serial port.
 
-        Accumulates bytes and extracts complete 22-byte frames.
+        Accumulates bytes and extracts complete frames. Frame size is determined
+        by the first byte via _FRAME_SIZES (default FRAME_SIZE_BYTES = 22).
+
         From 10_DUOFERNSTICK.pm DUOFERNSTICK_Read:
-          # Dispatch data in the buffer before the proper answer.
           $hash->{PARTIAL} = $mduodata; # for recursive calls
         """
-        # Cancel pending flush timer — new data arrived
         if self._flush_handle is not None:
             self._flush_handle.cancel()
             self._flush_handle = None
 
         self._buffer.extend(data)
 
-        # Extract all complete 22-byte frames from the buffer
-        while len(self._buffer) >= FRAME_SIZE_BYTES:
-            frame = bytearray(self._buffer[:FRAME_SIZE_BYTES])
-            del self._buffer[:FRAME_SIZE_BYTES]
+        # Extract all complete frames — size determined by first byte.
+        while True:
+            if not self._buffer:
+                break
+            expected = self._FRAME_SIZES.get(self._buffer[0], FRAME_SIZE_BYTES)
+            if len(self._buffer) < expected:
+                break
+            frame = bytearray(self._buffer[:expected])
+            del self._buffer[:expected]
 
-            # During init: deliver to the waiting future
             if self._init_response_future and not self._init_response_future.done():
                 self._init_response_future.set_result(frame)
             else:
-                # Normal operation: deliver via frame callback
                 self._frame_callback(frame)
 
-        # Schedule flush of any leftover partial data after timeout
         if len(self._buffer) > 0:
             loop = asyncio.get_running_loop()
             self._flush_handle = loop.call_later(

@@ -414,5 +414,17 @@
       "start": "Start",
       "end": "Ende"
     }
+  },
+  "services": {
+    "pair_device_by_code": {
+      "name": "Gerät per Code anmelden",
+      "description": "Meldet ein DuoFern-Gerät anhand seines 6-stelligen Hex-Codes an, ohne die Taste am Stick drücken zu müssen. Das Gerät muss sich im Anmeldemodus befinden. 10-stellige Codes (2020+) werden nicht unterstützt — diese zuerst über Homepilot anmelden.",
+      "fields": {
+        "device_code": {
+          "name": "Gerätecode",
+          "description": "6-stelliger Hex-Code auf dem Geräteetikett (z. B. \"40AB12\")."
+        }
+      }
+    }
   }
 }

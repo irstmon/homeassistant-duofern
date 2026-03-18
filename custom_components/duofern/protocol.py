@@ -789,15 +789,15 @@ class DuoFernDecoder:
     @staticmethod
     def _ensure_bytes(data: bytes | bytearray | str) -> bytearray:
         if isinstance(data, str):
-            if len(data) != FRAME_SIZE_HEX:
+            if len(data) < FRAME_SIZE_HEX:
                 raise ValueError(
-                    f"Hex string must be {FRAME_SIZE_HEX} chars, got {len(data)}"
+                    f"Hex string must be at least {FRAME_SIZE_HEX} chars, got {len(data)}"
                 )
-            return bytearray.fromhex(data)
+            return bytearray.fromhex(data[:FRAME_SIZE_HEX])
         if isinstance(data, (bytes, bytearray)):
-            if len(data) != FRAME_SIZE_BYTES:
+            if len(data) < FRAME_SIZE_BYTES:
                 raise ValueError(
-                    f"Frame must be {FRAME_SIZE_BYTES} bytes, got {len(data)}"
+                    f"Frame must be at least {FRAME_SIZE_BYTES} bytes, got {len(data)}"
                 )
             return bytearray(data)
         raise TypeError(f"Unsupported type: {type(data)}")
@@ -1240,6 +1240,12 @@ def validate_system_code(code: str) -> bool:
 
 
 def validate_device_code(code: str) -> bool:
+    """Validate device code: exactly 6 hex characters.
+
+    10-digit (2020+) codes are deliberately rejected — the MAC key required
+    for the pairing handshake is unknown. Use Auto-Discovery for 10-digit
+    devices that were paired via Homepilot.
+    """
     if len(code) != 6:
         return False
     try:
