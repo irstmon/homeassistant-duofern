@@ -219,7 +219,9 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
             entry = self.hass.config_entries.async_get_entry(self._discovered_entry_id)
             if entry is not None:
                 current: list[str] = list(entry.data.get(CONF_PAIRED_DEVICES, []))
-                if self._discovered_device_hex not in current:
+                # Deduplicate by base 6-char hex before appending.
+                existing_bases = {c[:6] for c in current}
+                if self._discovered_device_hex[:6] not in existing_bases:
                     current.append(self._discovered_device_hex)
                     self.hass.config_entries.async_update_entry(
                         entry,
@@ -242,17 +244,15 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> DuoFernOptionsFlow:
         """Return the options flow handler."""
-        return DuoFernOptionsFlow(config_entry)
+        return DuoFernOptionsFlow()
 
 
 class DuoFernOptionsFlow(OptionsFlow):
     """Handle DuoFern options (add/remove paired devices)."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        """Initialize options flow."""
-        # Note: OptionsFlow base class provides self.config_entry automatically.
-        # No need to store a separate reference.
-        super().__init__(config_entry)
+    # No __init__ needed — HA 2026.3+ provides self.config_entry automatically.
+    # Defining __init__(self, config_entry) + super().__init__(config_entry)
+    # raises TypeError in HA 2026.3: object.__init__() takes exactly one argument.
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

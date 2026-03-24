@@ -1,11 +1,76 @@
 # Changelog
 
-## [v2.1.0] — 2026-03-13
+## [v2.2.0] — 2026-03-24
+
+### New Features
+
+#### Code-Pairing (Pair by Code)
+
+Pair DuoFern devices by entering their 6-digit device code directly in the Home Assistant UI — no
+physical button press on the device required. This replicates the Rademacher Homepilot "Code anmelden"
+functionality.
+
+The device must be in its pairing window (RemotePair mode or within 2 hours of power-on). Only 6-digit
+device codes are supported; 10-digit (2020+) devices require pairing via Homepilot first, then use
+Auto-Discovery.
+
+**Protocol details:** The implementation was reverse-engineered by comparing OTA radio captures between the
+Homepilot and our integration using rtl_433 on 434.5 MHz. The key discovery was that USB frame byte 21
+(the flags byte) controls `pay[0]` in the radio frame — setting it to `0x01` enables pairing mode. This
+byte was undocumented in the FHEM reference implementation, which always uses `0x00`.
+
+Complete pairing sequence: SetPairs (0x03) → StartPair (0x04) → CodePair ×2 (0x0D with f[1]=0xFF,
+f[21]=0x01) → wait for 0x06 pair response → StopPair (0x05) → persist config → reload integration.
+
+#### Auto-Unpair
+
+When a device is unpaired during an active unpairing window, it is now automatically removed from the
+config entry and the integration reloads — mirroring the auto-add behaviour of pairing. Previously the
+device code had to be manually removed from the options flow.
+
+Sequence: 0603 unpair response received → StopUnpair (0x08) → remove from config → reload.
+
+#### Stop Pairing/Unpairing Button
+
+New button on the USB stick device card that stops the active pairing or unpairing window early. Only
+available (enabled) when a pairing or unpairing window is currently open.
+
+#### Separate RemotePair and CodePair Commands
+
+`build_remote_pair()` and `build_code_pair()` are now two distinct methods in `protocol.py`. RemotePair
+(FHEM original: f[1]=0x01, f[21]=0x00) tells a device to enter pairing mode over radio. CodePair (new:
+f[1]=0xFF, f[21]=0x01) pairs a device by code. Using the wrong flags byte caused RemotePair to fail —
+discovered by OTA comparison.
+
+### Bug Fixes
+
+- **Legacy pair response frame dropped** — `0x06` pair response frames from 6-digit (legacy) devices were
+  silently discarded. The serial parser expected 38-byte frames for all `0x06` messages (2020+ protocol),
+  but legacy devices send 22-byte frames. The parser waited for 16 more bytes that never arrived, then
+  flushed the buffer on timeout. Fixed with a fallback to 22 bytes when the buffer contains a complete
+  legacy frame.
+- **Pair-by-code race condition** — a successful code-pairing immediately triggered a config reload via
+  `_on_new_device_paired()`, disconnecting the stick before `StopPair` could be sent. The stick remained
+  in pairing mode until the next reconnect. Fixed by separating the code-pairing path: the `0602` pair
+  response now only resolves the Future (no reload), and `async_pair_device_by_code` handles the full
+  sequence — StopPair first, then persist config, then reload.
+- **Double reload on pair and unpair** — both code-pairing and auto-unpair triggered the integration
+  reload twice. The `_pairing_countdown` timer task continued running after the first reload, sending
+  another StopPair and state update that triggered a second reload. Fixed by cancelling any active
+  countdown tasks before triggering the reload.
+- **Wrong stop command on unpairing timeout** — `_pairing_countdown` always sent `StopPair` (0x05) when
+  the timer expired, even during unpairing. Should have sent `StopUnpair` (0x08). Fixed by adding an
+  `unpairing` parameter to `_pairing_countdown` so the correct stop command is sent.
+
+---
+
+## [v2.1.0] and [v2.1.1] — 2026-03-13
 
 ### Code Review & Quality Release
 
 Full code review of the entire integration codebase. 42 findings identified and resolved in the
-first review pass, 10 additional issues caught and fixed in two follow-up review rounds.
+first review pass, 10 additional issues caught and fixed in two follow-up review rounds. v2.1.1 is the
+same release as v2.1.0 - only re-released after adding tests for HACS.
 
 ### Bug Fixes
 

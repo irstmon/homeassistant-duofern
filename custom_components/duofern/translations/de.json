@@ -113,6 +113,12 @@
       },
       "write_config": {
         "name": "Konfiguration schreiben"
+      },
+      "pair_by_code": {
+        "name": "Gerät per Code anmelden"
+      },
+      "stop_pair_unpair": {
+        "name": "Kopplung/Entkopplung stoppen"
       }
     },
     "binary_sensor": {
@@ -389,6 +395,11 @@
       "boost_started": {
         "name": "Boost gestartet"
       }
+    },
+    "text": {
+      "pair_code_input": {
+        "name": "Gerätecode-Eingabe"
+      }
     }
   },
   "device_automation": {
@@ -413,6 +424,50 @@
       "off": "Aus",
       "start": "Start",
       "end": "Ende"
+    }
+  },
+  "services": {
+    "pair_device_by_code": {
+      "name": "Gerät per Code anmelden",
+      "description": "Meldet ein DuoFern-Gerät anhand seines 6-stelligen Hex-Codes an, ohne die Taste am Stick drücken zu müssen. Das Gerät muss sich im Anmeldemodus befinden. 10-stellige Codes (2020+) werden nicht unterstützt — diese zuerst über Homepilot anmelden.",
+      "fields": {
+        "device_code": {
+          "name": "Gerätecode",
+          "description": "6-stelliger Hex-Code auf dem Geräteetikett (z. B. \"40AB12\")."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "pair_no_input": {
+      "message": "Bitte zuerst einen gültigen 6-stelligen Hex-Gerätecode im Feld \"Gerätecode-Eingabe\" eingeben (z. B. 40AB12)."
+    },
+    "pair_no_input_title": {
+      "message": "DuoFern: Gerät per Code anmelden"
+    },
+    "pair_success": {
+      "message": "Gerät {device_code} erfolgreich angemeldet."
+    },
+    "pair_success_title": {
+      "message": "DuoFern: Gerät per Code anmelden"
+    },
+    "pair_aa": {
+      "message": "Gerät {device_code} hat nicht geantwortet (AA). Bitte sicherstellen, dass das Gerät eingeschaltet und im Anmeldemodus ist (erste 2 Stunden nach dem Einschalten oder manuell ausgelöst)."
+    },
+    "pair_aa_title": {
+      "message": "DuoFern: Gerät per Code anmelden"
+    },
+    "pair_bb": {
+      "message": "Gerät {device_code} hat die Anmeldung abgelehnt (BB). Es ist möglicherweise bereits bei einem anderen Controller angemeldet."
+    },
+    "pair_bb_title": {
+      "message": "DuoFern: Gerät per Code anmelden"
+    },
+    "pair_timeout": {
+      "message": "Timeout: Gerät {device_code} hat nicht innerhalb von {timeout} s geantwortet. Bitte sicherstellen, dass das Gerät im Anmeldemodus ist."
+    },
+    "pair_timeout_title": {
+      "message": "DuoFern: Gerät per Code anmelden"
     }
   }
 }

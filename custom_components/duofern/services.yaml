@@ -1,0 +1,18 @@
+pair_device_by_code:
+  name: Pair device by code
+  description: >
+    Pair a DuoFern device by entering its 6-digit hex code directly, without
+    pressing the physical pairing button on the stick. The device must be in
+    pairing mode (first 2 hours after power-up, or triggered manually).
+    Only 6-digit codes are supported. 10-digit (2020+) devices must be paired
+    via Homepilot first, then discovered automatically in HA.
+  fields:
+    device_code:
+      name: Device Code
+      description: >
+        6-digit hex code printed on the device label (e.g. "40AB12").
+        10-digit codes are not supported.
+      required: true
+      example: "40AB12"
+      selector:
+        text:

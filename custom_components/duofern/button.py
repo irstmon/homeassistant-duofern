@@ -29,9 +29,13 @@ from __future__ import annotations
 
 import logging
 
+import re
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import translation
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -61,7 +65,9 @@ async def async_setup_entry(
     entities: list[ButtonEntity] = [
         DuoFernPairButton(coordinator, system_code_hex),
         DuoFernUnpairButton(coordinator, system_code_hex),
+        DuoFernStopPairUnpairButton(coordinator, system_code_hex),
         DuoFernStatusButton(coordinator, system_code_hex),
+        DuoFernPairByCodeButton(coordinator, system_code_hex),
     ]
 
     # Add dusk/dawn/toggle buttons for every cover device
@@ -222,6 +228,40 @@ class DuoFernUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     async def async_press(self) -> None:
         """Start 60s unpairing window."""
         await self.coordinator.async_start_unpairing()
+
+
+class DuoFernStopPairUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Button to stop an active pairing or unpairing window early.
+
+    Only available (enabled) when pairing_active or unpairing_active is True.
+    Calls async_stop_pairing() or async_stop_unpairing() on the coordinator
+    depending on which mode is active.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "stop_pair_unpair"
+    _attr_icon = "mdi:stop-circle-outline"
+
+    def __init__(self, coordinator: DuoFernCoordinator, system_code_hex: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_stop_pair_unpair"
+        self._attr_device_info = _stick_device_info(coordinator, system_code_hex)
+
+    @property
+    def available(self) -> bool:
+        """Only available when a pairing or unpairing window is active."""
+        if self.coordinator.data is None:
+            return False
+        d = self.coordinator.data
+        return d.pairing_active or d.unpairing_active
+
+    async def async_press(self) -> None:
+        """Stop the active pairing or unpairing window."""
+        d = self.coordinator.data
+        if d.unpairing_active:
+            await self.coordinator.async_stop_unpairing()
+        elif d.pairing_active:
+            await self.coordinator.async_stop_pairing()
 
 
 class DuoFernStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
@@ -705,3 +745,81 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
 
     async def async_press(self) -> None:
         await self.coordinator.async_write_weather_config(self._device_code)
+
+
+# ---------------------------------------------------------------------------
+# Pair by code button (stick device card)
+# ---------------------------------------------------------------------------
+
+
+class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Button that triggers pair-by-code using the code from DuoFernPairCodeText.
+
+    Reads the current value of the pair_code_input text entity that lives on
+    the same stick device card, then calls async_pair_device_by_code() on the
+    coordinator. The result is shown as a persistent notification.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "pair_by_code"
+    _attr_icon = "mdi:link-lock"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: DuoFernCoordinator, system_code_hex: str) -> None:
+        """Initialize the pair-by-code button."""
+        super().__init__(coordinator)
+        self._system_code_hex = system_code_hex
+        self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_pair_by_code"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, system_code_hex)})
+
+    @property
+    def available(self) -> bool:
+        """Available when the stick is connected."""
+        return self.coordinator.last_update_success
+
+    async def async_press(self) -> None:
+        """Read the code from the text entity and trigger pairing."""
+        # Look up the companion text entity by unique_id in the entity registry.
+        reg = er.async_get(self.hass)
+        text_uid = f"{DOMAIN}_{self._system_code_hex}_pair_code_input"
+        text_entry = reg.async_get_entity_id("text", DOMAIN, text_uid)
+
+        device_code: str = ""
+        if text_entry:
+            state = self.hass.states.get(text_entry)
+            if state:
+                device_code = state.state.strip().upper()
+
+        if not re.match(r"^[0-9A-Fa-f]{6}$", device_code):
+            strings = await translation.async_get_translations(
+                self.hass, self.hass.config.language, "exceptions", {DOMAIN}
+            )
+            key_base = f"component.{DOMAIN}.exceptions"
+            title = strings.get(
+                f"{key_base}.pair_no_input_title.message", "DuoFern: Pair by Code"
+            )
+            message = strings.get(
+                f"{key_base}.pair_no_input.message",
+                "Please enter a valid 6-digit hex device code first (e.g. 40AB12).",
+            )
+            await self.hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": title,
+                    "message": message,
+                    "notification_id": "duofern_pair_by_code_no_input",
+                },
+            )
+            return
+
+        result = await self.coordinator.async_pair_device_by_code(device_code)
+        await self.hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "title": result.get("title", "DuoFern: Pair by Code"),
+                "message": result["message"],
+                "notification_id": f"duofern_pair_{result['device_code']}",
+            },
+        )

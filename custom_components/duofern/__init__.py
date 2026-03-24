@@ -42,9 +42,12 @@ from __future__ import annotations
 
 import logging
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
@@ -66,7 +69,11 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.EVENT,
+    Platform.TEXT,
 ]
+
+SERVICE_PAIR_BY_CODE = "pair_device_by_code"
+PAIR_BY_CODE_SCHEMA = vol.Schema({vol.Required("device_code"): cv.string})
 
 # Type alias for runtime data stored on the config entry
 type DuoFernConfigEntry = ConfigEntry[DuoFernCoordinator]
@@ -129,6 +136,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator
 
+    # Register the pair-by-code service (once per HA instance, not per entry).
+    if not hass.services.has_service(DOMAIN, SERVICE_PAIR_BY_CODE):
+
+        async def _handle_pair_by_code(call: ServiceCall) -> dict:
+            """Handle the pair_device_by_code service call."""
+            result = await coordinator.async_pair_device_by_code(
+                call.data["device_code"]
+            )
+            await hass.services.async_call(
+                "persistent_notification",
+                "create",
+                {
+                    "title": result.get("title", "DuoFern: Pair by Code"),
+                    "message": result["message"],
+                    "notification_id": f"duofern_pair_{result['device_code']}",
+                },
+            )
+            return result
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_PAIR_BY_CODE,
+            _handle_pair_by_code,
+            schema=PAIR_BY_CODE_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
+        )
+
     # Register callback so the coordinator can notify us when a brand-new
     # device is paired via the stick's pairing button.  We then persist its
     # hex code into the config entry's paired_devices list and reload the
@@ -138,7 +172,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
         if not isinstance(device_code, DuoFernId):
             return
         current: list[str] = list(entry.data.get(CONF_PAIRED_DEVICES, []))
-        if device_code.hex in current:
+        # Deduplicate by base 6-char hex — only store the short 6-char code.
+        existing_bases = {c[:6] for c in current}
+        if device_code.hex in existing_bases:
             _LOGGER.debug(
                 "Device %s already in paired list — skipping update",
                 device_code.hex,

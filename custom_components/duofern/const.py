@@ -48,6 +48,7 @@ DONGLE_SERIAL_PREFIX: Final = "6F"
 ACK_TIMEOUT: Final = 5.0
 INIT_RETRY_COUNT: Final = 4
 PAIR_TIMEOUT: Final = 60.0
+REMOTE_PAIR_TIMEOUT: Final = 10.0  # seconds to wait for CC/AA/BB after remotePair
 STATUS_TIMEOUT: Final = 30.0
 STATUS_RETRY_COUNT: Final = 4  # retries after ACK 810003CC (from FHEM)
 FLUSH_BUFFER_TIMEOUT: Final = 0.5

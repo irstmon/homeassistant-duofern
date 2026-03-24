@@ -732,10 +732,14 @@ class DuoFernEncoder:
 
     @staticmethod
     def build_remote_pair(device_code: DuoFernId) -> bytearray:
-        """duoRemotePair — direct pairing without physical button.
+        """duoRemotePair — tell device to enter pairing mode over radio.
 
         From 10_DUOFERNSTICK.pm:
           "0D0106010000000000000000000000000000yyyyyy00"
+
+        This sends a radio command to the DEVICE telling it to open its
+        pairing window (equivalent to pressing the pairing button).
+        NOT the same as code-pairing — see build_code_pair() for that.
         """
         f = DuoFernEncoder._frame()
         f[0] = 0x0D
@@ -743,6 +747,35 @@ class DuoFernEncoder:
         f[2] = 0x06
         f[3] = 0x01
         f[18:21] = device_code.raw
+        return f
+
+    @staticmethod
+    def build_code_pair(
+        device_code: DuoFernId,
+        system_code: DuoFernId,
+    ) -> bytearray:
+        """Code-pairing frame — pair device by code without button press.
+
+        OTA-verified 2026-03-24 against Homepilot "Code anmelden" capture:
+          USB: 0D FF 06 01 00 00 00 00 00 00 00 00 00 00 00 sys dev 01
+          OTA: pay[0]=01, pay[5..7]=2011FF, pay[8..9]=0601
+
+        Key differences from build_remote_pair (FHEM remotePair):
+          f[1]=0xFF  (not 0x01) → pay[7]=FF in radio frame
+          f[21]=0x01 (not 0x00) → pay[0]=01 in radio frame (pairing flag)
+          f[15:18]=system_code   → explicit system code in frame
+
+        Must be sent AFTER StartPair (0x04) to put stick in pairing mode,
+        and the frame must be sent TWICE (HP sends with counter 03 then 02).
+        """
+        f = DuoFernEncoder._frame()
+        f[0] = 0x0D
+        f[1] = 0xFF
+        f[2] = 0x06
+        f[3] = 0x01
+        f[15:18] = system_code.raw
+        f[18:21] = device_code.raw
+        f[21] = 0x01
         return f
 
     @staticmethod
@@ -789,15 +822,15 @@ class DuoFernDecoder:
     @staticmethod
     def _ensure_bytes(data: bytes | bytearray | str) -> bytearray:
         if isinstance(data, str):
-            if len(data) != FRAME_SIZE_HEX:
+            if len(data) < FRAME_SIZE_HEX:
                 raise ValueError(
-                    f"Hex string must be {FRAME_SIZE_HEX} chars, got {len(data)}"
+                    f"Hex string must be at least {FRAME_SIZE_HEX} chars, got {len(data)}"
                 )
-            return bytearray.fromhex(data)
+            return bytearray.fromhex(data[:FRAME_SIZE_HEX])
         if isinstance(data, (bytes, bytearray)):
-            if len(data) != FRAME_SIZE_BYTES:
+            if len(data) < FRAME_SIZE_BYTES:
                 raise ValueError(
-                    f"Frame must be {FRAME_SIZE_BYTES} bytes, got {len(data)}"
+                    f"Frame must be at least {FRAME_SIZE_BYTES} bytes, got {len(data)}"
                 )
             return bytearray(data)
         raise TypeError(f"Unsupported type: {type(data)}")
@@ -1240,6 +1273,12 @@ def validate_system_code(code: str) -> bool:
 
 
 def validate_device_code(code: str) -> bool:
+    """Validate device code: exactly 6 hex characters.
+
+    10-digit (2020+) codes are deliberately rejected — the MAC key required
+    for the pairing handshake is unknown. Use Auto-Discovery for 10-digit
+    devices that were paired via Homepilot.
+    """
     if len(code) != 6:
         return False
     try:

@@ -57,6 +57,7 @@ from datetime import datetime
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import translation
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -204,6 +205,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._pairing_task: asyncio.Task[None] | None = None
         self._unpairing_task: asyncio.Task[None] | None = None
 
+        # Future used by async_pair_device_by_code() to wait for CC/AA/BB
+        # after sending a remotePair frame. Tuple: (device_hex, future).
+        self._pending_pair_future: tuple[str, asyncio.Future[str]] | None = None
+
         # Guard flag to prevent multiple parallel reconnect tasks when the stick
         # sends several NOT_INITIALIZED (81010C55) frames in quick succession.
         self._reconnecting: bool = False
@@ -316,7 +321,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if not self._config_entry.options.get(CONF_AUTO_DISCOVER, False):
             return
         paired: list[str] = self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
-        if device_code.hex in paired:
+        # Compare by base 6-char hex — guards against stale 10-digit entries.
+        paired_bases = {c[:6] for c in paired}
+        if device_code.hex in paired_bases:
             return
         if device_code.device_type_name.startswith("Unknown"):
             return
@@ -760,6 +767,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.debug("Command ACK from %s", device_code.hex)
+        # Resolve pair-by-code future if one is waiting for this device (CC = success).
+        if self._pending_pair_future is not None:
+            pair_hex, pair_future = self._pending_pair_future
+            if device_code.hex == pair_hex and not pair_future.done():
+                pair_future.set_result("CC")
         state = self.data.devices.get(device_code.hex)
         if state:
             # Set receive-window guards based on what was just ACK'd (Bug_9/Bug_10).
@@ -795,6 +807,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.warning("Missing ACK from %s — marking unavailable", device_code.hex)
+        # Resolve pair-by-code future — device not reachable / not in pair mode (AA).
+        # Use device_code comparison so concurrent AAs from other devices
+        # do not accidentally resolve the future.
+        if self._pending_pair_future is not None:
+            pair_hex, pair_future = self._pending_pair_future
+            if device_code.hex == pair_hex and not pair_future.done():
+                pair_future.set_result("AA")
         state = self.data.devices.get(device_code.hex)
         if state:
             state.available = False
@@ -855,6 +874,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 device_code.hex,
             )
             return
+
+        # Resolve pair-by-code future — device rejected pairing (BB).
+        # Use device_code comparison so concurrent BBs from other devices
+        # do not accidentally resolve the future.
+        if self._pending_pair_future is not None:
+            pair_hex, pair_future = self._pending_pair_future
+            if device_code.hex == pair_hex and not pair_future.done():
+                pair_future.set_result("BB")
 
         _LOGGER.warning(
             "Unexpected 0x81 response 0x%02X from %s — command may have been rejected",
@@ -978,6 +1005,19 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """#Device paired (0602...)."""
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.info("Device paired: %s", device_code.hex)
+
+        # Resolve pair-by-code future — 0602 is the definitive success signal.
+        # When pair-by-code is active, do NOT trigger _on_new_device_paired here.
+        # async_pair_device_by_code handles the full sequence: StopPair → persist
+        # → reload. Triggering reload here causes a race condition where the stick
+        # disconnects before StopPair can be sent.
+        if self._pending_pair_future is not None:
+            pair_hex, pair_future = self._pending_pair_future
+            if device_code.hex == pair_hex and not pair_future.done():
+                pair_future.set_result("CC")
+                _LOGGER.info("Pair-by-code: 0602 received for %s — success!", pair_hex)
+                return  # Let async_pair_device_by_code handle persistence
+
         state = self.data.devices.get(device_code.hex)
         if state:
             state.last_paired = dt_util.now().isoformat(timespec="seconds")
@@ -994,13 +1034,69 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
 
     def _handle_unpair_response(self, frame: bytearray) -> None:
-        """#Device unpaired (0603...)."""
+        """#Device unpaired (0603...).
+
+        When received during an active unpairing window, the device is
+        automatically removed from the config entry and the integration
+        reloads — mirroring the auto-add behaviour of pairing.
+        Sequence: StopUnpair → remove from config → reload.
+        """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.info("Device unpaired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
             state.last_unpaired = dt_util.now().isoformat(timespec="seconds")
         self.async_set_updated_data(self.data)
+
+        # Auto-remove from config and reload.
+        self.hass.async_create_task(self._async_handle_unpair_persist(device_code))
+
+    async def _async_handle_unpair_persist(self, device_code: DuoFernId) -> None:
+        """Remove unpaired device from config entry and reload.
+
+        Runs as a separate task so the synchronous frame handler returns
+        immediately. Stops unpairing mode first to keep the stick stable.
+        """
+        from .const import CONF_PAIRED_DEVICES  # noqa: PLC0415
+
+        # Cancel any running countdown tasks to prevent double reload.
+        # The unpairing countdown (or a stale pairing countdown) may still be
+        # ticking — if it outlives the reload it sends another StopPair/StopUnpair
+        # + state update on the new coordinator instance → 2nd reload.
+        if self._unpairing_task and not self._unpairing_task.done():
+            self._unpairing_task.cancel()
+        self._unpairing_task = None
+        if self._pairing_task and not self._pairing_task.done():
+            self._pairing_task.cancel()
+        self._pairing_task = None
+        self.data.unpairing_active = False
+        self.data.pairing_active = False
+        self.data.pairing_remaining = 0
+        if self._stick:
+            try:
+                await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
+            except Exception:
+                pass
+        self.async_set_updated_data(self.data)
+
+        # Remove device from config entry
+        current: list[str] = list(self._config_entry.data.get(CONF_PAIRED_DEVICES, []))
+        device_hex = device_code.hex
+        updated = [c for c in current if c[:6] != device_hex]
+        if len(updated) < len(current):
+            _LOGGER.info(
+                "Removing unpaired device %s from config entry (%d → %d devices)",
+                device_hex,
+                len(current),
+                len(updated),
+            )
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={**self._config_entry.data, CONF_PAIRED_DEVICES: updated},
+            )
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self._config_entry.entry_id)
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1041,8 +1137,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         finally:
             self._reconnecting = False
 
-    async def _pairing_countdown(self, duration: int) -> None:
-        """Countdown timer for pairing/unpairing UI."""
+    async def _pairing_countdown(self, duration: int, unpairing: bool = False) -> None:
+        """Countdown timer for pairing/unpairing UI.
+
+        Args:
+            duration: countdown in seconds.
+            unpairing: if True, send StopUnpair at timeout; else StopPair.
+        """
         for remaining in range(duration, 0, -1):
             self.data.pairing_remaining = remaining
             self.async_set_updated_data(self.data)
@@ -1051,7 +1152,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.pairing_active = False
         self.data.unpairing_active = False
         if self._stick:
-            await self._stick.send_command(DuoFernEncoder.build_stop_pair())
+            if unpairing:
+                await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
+            else:
+                await self._stick.send_command(DuoFernEncoder.build_stop_pair())
         self.async_set_updated_data(self.data)
 
     # ------------------------------------------------------------------
@@ -1094,7 +1198,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.pairing_remaining = duration
         self.async_set_updated_data(self.data)
         self._unpairing_task = self.hass.async_create_task(
-            self._pairing_countdown(duration)
+            self._pairing_countdown(duration, unpairing=True)
         )
         _LOGGER.info("Unpairing started (%ds)", duration)
 
@@ -1107,6 +1211,194 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick:
             await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
         self.async_set_updated_data(self.data)
+
+    async def async_pair_device_by_code(self, device_code_hex: str) -> dict:
+        """Pair a 6-digit device by sending a remotePair frame directly.
+
+        Protocol sequence (OTA-verified against Homepilot):
+          1. Validate: only 6-digit codes accepted (10-digit MAC key unknown).
+          2. Pre-register device in stick SetPairs table (0x03).
+          3. Enter pairing mode (0x04 StartPair) — sets pay[0]=01 on radio.
+          4. Send remotePair frame twice (0x0D with f[21]=0x01).
+          5. Wait for 0602 pair response or timeout.
+          6. Exit pairing mode (0x05 StopPair) — BEFORE config persist/reload
+             to avoid race condition where reload disconnects the stick.
+          7. CC → persist to config entry, reload integration.
+             AA → device unreachable or not in pairing mode.
+             TIMEOUT → no response within timeout window.
+
+        Returns dict: success (bool), message (str), device_code (str).
+        """
+        from .const import CONF_PAIRED_DEVICES, REMOTE_PAIR_TIMEOUT  # noqa: PLC0415
+        from .protocol import validate_device_code  # noqa: PLC0415
+
+        device_code_hex = device_code_hex.upper().strip()
+
+        if len(device_code_hex) == 10:
+            return {
+                "success": False,
+                "message": (
+                    "10-digit device codes cannot be actively paired — the "
+                    "rolling-code MAC key is unknown. Pair the device via "
+                    "Homepilot first, then use Auto-Discovery in HA to add it."
+                ),
+                "device_code": device_code_hex,
+            }
+
+        if not validate_device_code(device_code_hex):
+            return {
+                "success": False,
+                "message": f"Invalid device code '{device_code_hex}'. Must be exactly 6 hex characters.",
+                "device_code": device_code_hex,
+            }
+
+        if self._stick is None:
+            return {
+                "success": False,
+                "message": "DuoFern stick is not connected.",
+                "device_code": device_code_hex,
+            }
+
+        device_code = DuoFernId.from_hex(device_code_hex)
+
+        # Set up the pair future FIRST — before any pairing commands.
+        # The device may respond with 0602 immediately after StartPair
+        # if it's already in RemotePair mode, so the future must be
+        # ready to catch it before we send anything.
+        loop = asyncio.get_running_loop()
+        pair_future: asyncio.Future[str] = loop.create_future()
+        self._pending_pair_future = (device_code_hex, pair_future)
+
+        try:
+            # Step 1: Pre-register in stick SetPairs table.
+            # Without this the stick drops the frame with 81010C55.
+            slot = len(self._paired_devices)
+            await self._stick.send_command(
+                DuoFernEncoder.build_set_pair(slot, device_code)
+            )
+            await asyncio.sleep(0.2)
+
+            # Step 2: Enter pairing mode (0x04 StartPair).
+            # This switches the stick so that 0x0D frames are sent OTA with
+            # pay[0]=01 and a real rolling counter in pay[1..3].
+            # Without this, the device ignores the pair frame (pay[0]=00).
+            # NOTE: If the device is already in RemotePair mode, it may
+            # respond with 0602 here — the future will catch it.
+            await self._stick.send_command(DuoFernEncoder.build_start_pair())
+            await asyncio.sleep(0.5)
+
+            # Check if the device already paired from StartPair alone
+            if not pair_future.done():
+                # Step 3: Send code-pair frame TWICE.
+                # Homepilot sends 2x with decrementing OTA counter (03, 02).
+                # The stick auto-decrements the counter per frame.
+                pair_frame = DuoFernEncoder.build_code_pair(
+                    device_code, self._system_code
+                )
+                await self._stick.send_command(pair_frame)
+                await self._stick.send_command(pair_frame)
+
+            try:
+                result = await asyncio.wait_for(
+                    pair_future, timeout=REMOTE_PAIR_TIMEOUT
+                )
+            except asyncio.TimeoutError:
+                result = "TIMEOUT"
+        finally:
+            self._pending_pair_future = None
+
+        # Cancel any running pairing countdown task to prevent double reload.
+        # If the user pressed "Start Pairing" before code-pairing, or if
+        # async_start_pairing was called as part of the flow, a countdown task
+        # may still be ticking. If it outlives the reload, it sends another
+        # StopPair + state update on the new coordinator instance → 2nd reload.
+        if self._pairing_task and not self._pairing_task.done():
+            self._pairing_task.cancel()
+            self._pairing_task = None
+        self.data.pairing_active = False
+        self.data.pairing_remaining = 0
+
+        # Step 4: Exit pairing mode BEFORE any config persist or reload.
+        # This must happen while the stick is still connected.
+        if self._stick:
+            try:
+                await self._stick.send_command(DuoFernEncoder.build_stop_pair())
+                _LOGGER.debug("StopPair sent — stick back to normal mode")
+            except Exception:
+                _LOGGER.debug("StopPair failed — stick may be disconnected")
+
+        # Load translations for notification messages.
+        strings = await translation.async_get_translations(
+            self.hass, self.hass.config.language, "exceptions", {DOMAIN}
+        )
+
+        def _t(key: str, **kwargs: object) -> str:
+            """Fetch translated notification message from exceptions block."""
+            raw = strings.get(f"component.{DOMAIN}.exceptions.{key}.message", "")
+            return raw.format(**kwargs) if raw else ""
+
+        def _title(key: str) -> str:
+            """Fetch translated notification title from exceptions block."""
+            return strings.get(
+                f"component.{DOMAIN}.exceptions.{key}_title.message",
+                "DuoFern: Pair by Code",
+            )
+
+        # Step 5: Handle result — persist and reload only AFTER StopPair.
+        if result == "CC":
+            _LOGGER.info(
+                "Pair-by-code success for %s — persisting and reloading",
+                device_code_hex,
+            )
+            current: list[str] = list(
+                self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
+            )
+            if device_code_hex not in {c[:6] for c in current}:
+                current.append(device_code_hex)
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data={**self._config_entry.data, CONF_PAIRED_DEVICES: current},
+                )
+                self.hass.async_create_task(
+                    self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                )
+            return {
+                "success": True,
+                "title": _title("pair_success"),
+                "message": _t("pair_success", device_code=device_code_hex)
+                or f"Device {device_code_hex} paired successfully.",
+                "device_code": device_code_hex,
+            }
+
+        if result == "AA":
+            return {
+                "success": False,
+                "title": _title("pair_aa"),
+                "message": _t("pair_aa", device_code=device_code_hex)
+                or f"Device {device_code_hex} did not respond (AA).",
+                "device_code": device_code_hex,
+            }
+
+        if result == "BB":
+            return {
+                "success": False,
+                "title": _title("pair_bb"),
+                "message": _t("pair_bb", device_code=device_code_hex)
+                or f"Device {device_code_hex} rejected pairing (BB).",
+                "device_code": device_code_hex,
+            }
+
+        return {
+            "success": False,
+            "title": _title("pair_timeout"),
+            "message": _t(
+                "pair_timeout",
+                device_code=device_code_hex,
+                timeout=int(REMOTE_PAIR_TIMEOUT),
+            )
+            or f"Pairing timeout: {device_code_hex} did not respond within {REMOTE_PAIR_TIMEOUT:.0f}s.",
+            "device_code": device_code_hex,
+        }
 
     async def async_request_all_status(self) -> None:
         """Send status broadcast to all paired devices."""
