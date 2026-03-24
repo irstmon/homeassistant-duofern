@@ -192,6 +192,19 @@ Three buttons appear on the **DuoFern Stick device card**:
 | **Start unpairing** | Opens a 60-second unpairing window. Press the unpair button on a paired device to remove it. |
 | **Status Broadcast** | Sends a broadcast status request to all paired devices, refreshing all states in HA. |
 
+### Pair by Code (Code-Pairing)
+
+Pair DuoFern devices by entering their 6-digit device code — **no physical button press required**. This replicates the Rademacher Homepilot "Code anmelden" functionality.
+
+**How to use:**
+
+1. Put the device in pairing mode (within 2 hours of power-on, or set to RemotePair)
+2. Enter the 6-digit hex code (printed on the device) in the **"Pair by Code"** text field on the stick device card
+3. Press the **"Pair by Code"** button
+4. If successful, the device is added automatically and the integration reloads
+
+Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired via Homepilot first, then added via Auto-Discovery.
+
 ### Per-Device Buttons
 
 | Button | Devices | What it does |
@@ -220,6 +233,7 @@ Each paired Handsender or Wandtaster gets a dedicated **EventEntity** in HA. Whe
 - **Last Seen sensor** — every device gets a `Last Seen` timestamp sensor that updates whenever a frame is received, with `RestoreEntity` persistence
 - **Automatic device discovery** *(opt-in)* — unknown devices that send frames but are not yet in your paired list automatically appear in the HA Discovered inbox. Enable under **Settings → Devices & Services → DuoFern → Configure**. See [Automatic Device Discovery](#automatic-device-discovery) below
 - **Auto-add on pairing** — when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
+- **Pair by Code** — pair devices by entering their 6-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
 
 ---
 
@@ -390,6 +404,11 @@ python3 tools/pair_duofern.py pair --timeout 120 -v  # Extended timeout + debug
 - **Boost frame layout** (OTA-verified via rtl_433):
   - ON: `f[8] = 0x40 | duration_min` (only if duration changed, else `0x00`), `f[11] = 0x03`; `sv` contains desired-temp only if it was changed, else `0x000000`
   - OFF: `f[8] = 0x00`, `f[11] = 0x02` (critical — `0x00` is silently ignored by the device)
+- **Code-Pairing protocol** (OTA-verified via rtl_433):
+  - USB frame byte 21 (flags) controls `pay[0]` in the radio frame: `0x00` = normal command, `0x01` = pairing mode
+  - Sequence: SetPairs (0x03) → StartPair (0x04) → RemotePair ×2 (0x0D, flags=0x01) → wait for 0x06 response → StopPair (0x05)
+  - The stick must be in pairing mode (StartPair) before sending the pair frame
+  - `f[1]=0xFF` required for correct radio payload mapping (`pay[7]=FF`)
 
 #### Sniffing DuoFern Radio Frames (rtl_433)
 

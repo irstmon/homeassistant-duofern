@@ -731,18 +731,29 @@ class DuoFernEncoder:
         return f
 
     @staticmethod
-    def build_remote_pair(device_code: DuoFernId) -> bytearray:
+    def build_remote_pair(
+        device_code: DuoFernId,
+        system_code: DuoFernId | None = None,
+    ) -> bytearray:
         """duoRemotePair — direct pairing without physical button.
 
-        From 10_DUOFERNSTICK.pm:
-          "0D0106010000000000000000000000000000yyyyyy00"
+        OTA-verified against Homepilot code-pairing capture:
+          HP pair frame: pay[5..7]=2011FF, pay[8..9]=0601
+          USB[1]=0xFF → pay[7]=FF (matches HP)
+          USB[2]=0x06, USB[3]=0x01 → pay[8..9]=0601 (pair command)
+          f[21]=0x01 — flags byte, may control pay[0] in radio frame
+
+        Must be sent after StartPair (0x04).
         """
         f = DuoFernEncoder._frame()
         f[0] = 0x0D
-        f[1] = 0x01
+        f[1] = 0xFF
         f[2] = 0x06
         f[3] = 0x01
+        if system_code is not None:
+            f[15:18] = system_code.raw
         f[18:21] = device_code.raw
+        f[21] = 0x01
         return f
 
     @staticmethod

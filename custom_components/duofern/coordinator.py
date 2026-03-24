@@ -1005,6 +1005,19 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """#Device paired (0602...)."""
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.info("Device paired: %s", device_code.hex)
+
+        # Resolve pair-by-code future — 0602 is the definitive success signal.
+        # When pair-by-code is active, do NOT trigger _on_new_device_paired here.
+        # async_pair_device_by_code handles the full sequence: StopPair → persist
+        # → reload. Triggering reload here causes a race condition where the stick
+        # disconnects before StopPair can be sent.
+        if self._pending_pair_future is not None:
+            pair_hex, pair_future = self._pending_pair_future
+            if device_code.hex == pair_hex and not pair_future.done():
+                pair_future.set_result("CC")
+                _LOGGER.info("Pair-by-code: 0602 received for %s — success!", pair_hex)
+                return  # Let async_pair_device_by_code handle persistence
+
         state = self.data.devices.get(device_code.hex)
         if state:
             state.last_paired = dt_util.now().isoformat(timespec="seconds")
@@ -1138,14 +1151,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     async def async_pair_device_by_code(self, device_code_hex: str) -> dict:
         """Pair a 6-digit device by sending a remotePair frame directly.
 
-        Protocol (from 10_DUOFERNSTICK.pm duoRemotePair):
+        Protocol sequence (OTA-verified against Homepilot):
           1. Validate: only 6-digit codes accepted (10-digit MAC key unknown).
-          2. Pre-register device in stick SetPairs table BEFORE remotePair —
-             without this the stick returns 81010C55 (NOT_INITIALIZED).
-          3. Send remotePair and wait for CC/AA/BB (REMOTE_PAIR_TIMEOUT).
-          4. CC -> persist to config entry, reload integration.
-             AA -> device unreachable or not in pairing mode.
-             BB -> device rejected pairing.
+          2. Pre-register device in stick SetPairs table (0x03).
+          3. Enter pairing mode (0x04 StartPair) — sets pay[0]=01 on radio.
+          4. Send remotePair frame twice (0x0D with f[21]=0x01).
+          5. Wait for 0602 pair response or timeout.
+          6. Exit pairing mode (0x05 StopPair) — BEFORE config persist/reload
+             to avoid race condition where reload disconnects the stick.
+          7. CC → persist to config entry, reload integration.
+             AA → device unreachable or not in pairing mode.
+             TIMEOUT → no response within timeout window.
 
         Returns dict: success (bool), message (str), device_code (str).
         """
@@ -1181,20 +1197,31 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         device_code = DuoFernId.from_hex(device_code_hex)
 
-        # Pre-register in stick SetPairs table — required before remotePair.
+        # Step 1: Pre-register in stick SetPairs table.
         # Without this the stick drops the frame with 81010C55.
         slot = len(self._paired_devices)
         await self._stick.send_command(DuoFernEncoder.build_set_pair(slot, device_code))
         await asyncio.sleep(0.2)
 
-        # Set up Future, then send remotePair.
+        # Step 2: Enter pairing mode (0x04 StartPair).
+        # This switches the stick so that 0x0D frames are sent OTA with
+        # pay[0]=01 and a real rolling counter in pay[1..3].
+        # Without this, the device ignores the pair frame (pay[0]=00).
+        await self._stick.send_command(DuoFernEncoder.build_start_pair())
+        await asyncio.sleep(0.5)
+
+        # Step 3: Send remotePair frame TWICE.
+        # Homepilot sends 2x with decrementing OTA counter (03, 02).
+        # The stick auto-decrements the counter per frame.
         loop = asyncio.get_running_loop()
         pair_future: asyncio.Future[str] = loop.create_future()
         self._pending_pair_future = (device_code_hex, pair_future)
         try:
-            await self._stick.send_command(
-                DuoFernEncoder.build_remote_pair(device_code)
+            pair_frame = DuoFernEncoder.build_remote_pair(
+                device_code, self._system_code
             )
+            await self._stick.send_command(pair_frame)
+            await self._stick.send_command(pair_frame)
             try:
                 result = await asyncio.wait_for(
                     pair_future, timeout=REMOTE_PAIR_TIMEOUT
@@ -1203,6 +1230,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 result = "TIMEOUT"
         finally:
             self._pending_pair_future = None
+
+        # Step 4: Exit pairing mode BEFORE any config persist or reload.
+        # This must happen while the stick is still connected.
+        if self._stick:
+            try:
+                await self._stick.send_command(DuoFernEncoder.build_stop_pair())
+                _LOGGER.debug("StopPair sent — stick back to normal mode")
+            except Exception:
+                _LOGGER.debug("StopPair failed — stick may be disconnected")
 
         # Load translations for notification messages.
         strings = await translation.async_get_translations(
@@ -1221,9 +1257,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 "DuoFern: Pair by Code",
             )
 
+        # Step 5: Handle result — persist and reload only AFTER StopPair.
         if result == "CC":
             _LOGGER.info(
-                "remotePair CC from %s — persisting and reloading", device_code_hex
+                "Pair-by-code success for %s — persisting and reloading",
+                device_code_hex,
             )
             current: list[str] = list(
                 self._config_entry.data.get(CONF_PAIRED_DEVICES, [])

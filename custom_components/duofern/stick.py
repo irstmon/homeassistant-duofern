@@ -510,6 +510,16 @@ class DuoFernSerialProtocol(asyncio.Protocol):
             if not self._buffer:
                 break
             expected = self._FRAME_SIZES.get(self._buffer[0], FRAME_SIZE_BYTES)
+            # 0x06 pair responses: 2020+ devices send 38 bytes, legacy
+            # 6-digit devices send 22 bytes.  If we have >=22 but <38,
+            # this is a legacy pair response — process at 22 bytes instead
+            # of waiting for 16 more bytes that will never arrive.
+            if (
+                self._buffer[0] == 0x06
+                and len(self._buffer) >= FRAME_SIZE_BYTES
+                and len(self._buffer) < expected
+            ):
+                expected = FRAME_SIZE_BYTES
             if len(self._buffer) < expected:
                 break
             frame = bytearray(self._buffer[:expected])
