@@ -731,27 +731,49 @@ class DuoFernEncoder:
         return f
 
     @staticmethod
-    def build_remote_pair(
+    def build_remote_pair(device_code: DuoFernId) -> bytearray:
+        """duoRemotePair — tell device to enter pairing mode over radio.
+
+        From 10_DUOFERNSTICK.pm:
+          "0D0106010000000000000000000000000000yyyyyy00"
+
+        This sends a radio command to the DEVICE telling it to open its
+        pairing window (equivalent to pressing the pairing button).
+        NOT the same as code-pairing — see build_code_pair() for that.
+        """
+        f = DuoFernEncoder._frame()
+        f[0] = 0x0D
+        f[1] = 0x01
+        f[2] = 0x06
+        f[3] = 0x01
+        f[18:21] = device_code.raw
+        return f
+
+    @staticmethod
+    def build_code_pair(
         device_code: DuoFernId,
-        system_code: DuoFernId | None = None,
+        system_code: DuoFernId,
     ) -> bytearray:
-        """duoRemotePair — direct pairing without physical button.
+        """Code-pairing frame — pair device by code without button press.
 
-        OTA-verified against Homepilot code-pairing capture:
-          HP pair frame: pay[5..7]=2011FF, pay[8..9]=0601
-          USB[1]=0xFF → pay[7]=FF (matches HP)
-          USB[2]=0x06, USB[3]=0x01 → pay[8..9]=0601 (pair command)
-          f[21]=0x01 — flags byte, may control pay[0] in radio frame
+        OTA-verified 2026-03-24 against Homepilot "Code anmelden" capture:
+          USB: 0D FF 06 01 00 00 00 00 00 00 00 00 00 00 00 sys dev 01
+          OTA: pay[0]=01, pay[5..7]=2011FF, pay[8..9]=0601
 
-        Must be sent after StartPair (0x04).
+        Key differences from build_remote_pair (FHEM remotePair):
+          f[1]=0xFF  (not 0x01) → pay[7]=FF in radio frame
+          f[21]=0x01 (not 0x00) → pay[0]=01 in radio frame (pairing flag)
+          f[15:18]=system_code   → explicit system code in frame
+
+        Must be sent AFTER StartPair (0x04) to put stick in pairing mode,
+        and the frame must be sent TWICE (HP sends with counter 03 then 02).
         """
         f = DuoFernEncoder._frame()
         f[0] = 0x0D
         f[1] = 0xFF
         f[2] = 0x06
         f[3] = 0x01
-        if system_code is not None:
-            f[15:18] = system_code.raw
+        f[15:18] = system_code.raw
         f[18:21] = device_code.raw
         f[21] = 0x01
         return f

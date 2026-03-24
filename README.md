@@ -203,7 +203,7 @@ Pair DuoFern devices by entering their 6-digit device code — **no physical but
 3. Press the **"Pair by Code"** button
 4. If successful, the device is added automatically and the integration reloads
 
-Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired via Homepilot first, then added via Auto-Discovery.
+Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired via Homepilot first, then added via Auto-Discovery or paired using button press method.
 
 ### Per-Device Buttons
 

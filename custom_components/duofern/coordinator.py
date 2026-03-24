@@ -1034,13 +1034,62 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
 
     def _handle_unpair_response(self, frame: bytearray) -> None:
-        """#Device unpaired (0603...)."""
+        """#Device unpaired (0603...).
+
+        When received during an active unpairing window, the device is
+        automatically removed from the config entry and the integration
+        reloads — mirroring the auto-add behaviour of pairing.
+        Sequence: StopUnpair → remove from config → reload.
+        """
         device_code = DuoFernDecoder.extract_device_code(frame)
         _LOGGER.info("Device unpaired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
             state.last_unpaired = dt_util.now().isoformat(timespec="seconds")
         self.async_set_updated_data(self.data)
+
+        # Auto-remove from config and reload.
+        self.hass.async_create_task(self._async_handle_unpair_persist(device_code))
+
+    async def _async_handle_unpair_persist(self, device_code: DuoFernId) -> None:
+        """Remove unpaired device from config entry and reload.
+
+        Runs as a separate task so the synchronous frame handler returns
+        immediately. Stops unpairing mode first to keep the stick stable.
+        """
+        from .const import CONF_PAIRED_DEVICES  # noqa: PLC0415
+
+        # Stop unpairing window first (if active)
+        if self.data.unpairing_active:
+            if self._unpairing_task and not self._unpairing_task.done():
+                self._unpairing_task.cancel()
+            self.data.unpairing_active = False
+            self.data.pairing_remaining = 0
+            if self._stick:
+                try:
+                    await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
+                except Exception:
+                    pass
+            self.async_set_updated_data(self.data)
+
+        # Remove device from config entry
+        current: list[str] = list(self._config_entry.data.get(CONF_PAIRED_DEVICES, []))
+        device_hex = device_code.hex
+        updated = [c for c in current if c[:6] != device_hex]
+        if len(updated) < len(current):
+            _LOGGER.info(
+                "Removing unpaired device %s from config entry (%d → %d devices)",
+                device_hex,
+                len(current),
+                len(updated),
+            )
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={**self._config_entry.data, CONF_PAIRED_DEVICES: updated},
+            )
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self._config_entry.entry_id)
+            )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -1197,31 +1246,43 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         device_code = DuoFernId.from_hex(device_code_hex)
 
-        # Step 1: Pre-register in stick SetPairs table.
-        # Without this the stick drops the frame with 81010C55.
-        slot = len(self._paired_devices)
-        await self._stick.send_command(DuoFernEncoder.build_set_pair(slot, device_code))
-        await asyncio.sleep(0.2)
-
-        # Step 2: Enter pairing mode (0x04 StartPair).
-        # This switches the stick so that 0x0D frames are sent OTA with
-        # pay[0]=01 and a real rolling counter in pay[1..3].
-        # Without this, the device ignores the pair frame (pay[0]=00).
-        await self._stick.send_command(DuoFernEncoder.build_start_pair())
-        await asyncio.sleep(0.5)
-
-        # Step 3: Send remotePair frame TWICE.
-        # Homepilot sends 2x with decrementing OTA counter (03, 02).
-        # The stick auto-decrements the counter per frame.
+        # Set up the pair future FIRST — before any pairing commands.
+        # The device may respond with 0602 immediately after StartPair
+        # if it's already in RemotePair mode, so the future must be
+        # ready to catch it before we send anything.
         loop = asyncio.get_running_loop()
         pair_future: asyncio.Future[str] = loop.create_future()
         self._pending_pair_future = (device_code_hex, pair_future)
+
         try:
-            pair_frame = DuoFernEncoder.build_remote_pair(
-                device_code, self._system_code
+            # Step 1: Pre-register in stick SetPairs table.
+            # Without this the stick drops the frame with 81010C55.
+            slot = len(self._paired_devices)
+            await self._stick.send_command(
+                DuoFernEncoder.build_set_pair(slot, device_code)
             )
-            await self._stick.send_command(pair_frame)
-            await self._stick.send_command(pair_frame)
+            await asyncio.sleep(0.2)
+
+            # Step 2: Enter pairing mode (0x04 StartPair).
+            # This switches the stick so that 0x0D frames are sent OTA with
+            # pay[0]=01 and a real rolling counter in pay[1..3].
+            # Without this, the device ignores the pair frame (pay[0]=00).
+            # NOTE: If the device is already in RemotePair mode, it may
+            # respond with 0602 here — the future will catch it.
+            await self._stick.send_command(DuoFernEncoder.build_start_pair())
+            await asyncio.sleep(0.5)
+
+            # Check if the device already paired from StartPair alone
+            if not pair_future.done():
+                # Step 3: Send code-pair frame TWICE.
+                # Homepilot sends 2x with decrementing OTA counter (03, 02).
+                # The stick auto-decrements the counter per frame.
+                pair_frame = DuoFernEncoder.build_code_pair(
+                    device_code, self._system_code
+                )
+                await self._stick.send_command(pair_frame)
+                await self._stick.send_command(pair_frame)
+
             try:
                 result = await asyncio.wait_for(
                     pair_future, timeout=REMOTE_PAIR_TIMEOUT
