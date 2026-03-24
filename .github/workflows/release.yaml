@@ -1,0 +1,40 @@
+name: Update version on release
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  update-manifest-version:
+    name: Set manifest.json version from release tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.target_commitish }}
+
+      - name: Get version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Update manifest.json
+        run: |
+          jq --arg v "${{ steps.version.outputs.version }}" \
+            '.version = $v' \
+            custom_components/duofern/manifest.json > tmp.json \
+            && mv tmp.json custom_components/duofern/manifest.json
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/duofern/manifest.json
+          git diff --cached --quiet || git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+          git push
