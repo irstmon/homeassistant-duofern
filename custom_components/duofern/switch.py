@@ -51,7 +51,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 

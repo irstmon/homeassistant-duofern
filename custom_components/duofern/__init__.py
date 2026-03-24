@@ -47,6 +47,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -93,6 +94,14 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(config_entry, data=new_data, version=2)
         _LOGGER.info("Migrated DuoFern config entry to version 2")
 
+    if config_entry.version > 2:
+        _LOGGER.error(
+            "Cannot migrate DuoFern config entry from version %s — "
+            "downgrade the integration to the version that created it",
+            config_entry.version,
+        )
+        return False
+
     return True
 
 
@@ -130,8 +139,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     try:
         await coordinator.async_connect()
     except Exception as err:
-        _LOGGER.error("Failed to connect to DuoFern stick: %s", err)
-        raise
+        raise ConfigEntryNotReady(f"Cannot connect to DuoFern stick: {err}") from err
 
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator

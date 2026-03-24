@@ -45,17 +45,14 @@ DUOFERN_EVENT is the HA event bus name for all sensor/obstacle events.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
-
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import translation
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -66,6 +63,7 @@ from .const import (
     CONF_PAIRED_DEVICES,
     DEVICE_CHANNELS,
     DOMAIN,
+    REMOTE_PAIR_TIMEOUT,
     STATUS_RETRY_COUNT,
     STATUS_TIMEOUT,
 )
@@ -76,9 +74,12 @@ from .protocol import (
     DuoFernId,
     ParsedStatus,
     SwitchCommand,
-    WeatherData,
+    validate_device_code,
 )
 from .stick import DuoFernStick
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -195,8 +196,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             _LOGGER,
             name=DOMAIN,
             update_interval=None,  # Push-based, no polling
+            config_entry=config_entry,
         )
-        self._config_entry = config_entry
         self._serial_port = serial_port
         self._system_code = system_code
         self._paired_devices = paired_devices
@@ -217,7 +218,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # pairing button. Registered by async_setup_entry in __init__.py so the
         # new device's hex code can be persisted into the config entry data.
         # Signature: (device_code: DuoFernId) -> None
-        self._on_new_device_paired: object = None
+        self._on_new_device_paired: Callable[[DuoFernId], None] | None = None
 
         # Pre-populate data with all known devices
         self.data = DuoFernData()
@@ -260,7 +261,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def register_on_new_device_paired(self, callback: object) -> None:
+    def register_on_new_device_paired(
+        self, callback: Callable[[DuoFernId], None]
+    ) -> None:
         """Register a callback invoked when a new device is paired.
 
         Called by async_setup_entry so the new hex code can be written back
@@ -290,7 +293,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         )
 
     async def async_disconnect(self) -> None:
-        """Disconnect the USB stick."""
+        """Disconnect the USB stick and cancel all running tasks."""
+        # Cancel pairing/unpairing countdown tasks
+        if self._pairing_task and not self._pairing_task.done():
+            self._pairing_task.cancel()
+        if self._unpairing_task and not self._unpairing_task.done():
+            self._unpairing_task.cancel()
+        # Cancel all per-device status timeout tasks
+        for state in self.data.devices.values():
+            self._cancel_status_timeout(state)
+        # Disconnect the stick
         if self._stick:
             await self._stick.disconnect()
             self._stick = None
@@ -318,9 +330,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           3. device type is recognised (not Unknown 0xXX)
         HA's async_set_unique_id in the flow prevents duplicate inbox entries.
         """
-        if not self._config_entry.options.get(CONF_AUTO_DISCOVER, False):
+        if not self.config_entry.options.get(CONF_AUTO_DISCOVER, False):
             return
-        paired: list[str] = self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
+        paired: list[str] = self.config_entry.data.get(CONF_PAIRED_DEVICES, [])
         # Compare by base 6-char hex — guards against stale 10-digit entries.
         paired_bases = {c[:6] for c in paired}
         if device_code.hex in paired_bases:
@@ -332,7 +344,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             device_code.hex,
             device_code.device_type_name,
         )
-        from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY  # noqa: PLC0415
 
         self.hass.async_create_task(
             self.hass.config_entries.flow.async_init(
@@ -341,7 +352,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 data={
                     "device_hex": device_code.hex,
                     "device_name": device_code.device_type_name,
-                    "entry_id": self._config_entry.entry_id,
+                    "entry_id": self.config_entry.entry_id,
                 },
             )
         )
@@ -1057,7 +1068,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Runs as a separate task so the synchronous frame handler returns
         immediately. Stops unpairing mode first to keep the stick stable.
         """
-        from .const import CONF_PAIRED_DEVICES  # noqa: PLC0415
 
         # Cancel any running countdown tasks to prevent double reload.
         # The unpairing countdown (or a stale pairing countdown) may still be
@@ -1080,7 +1090,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
 
         # Remove device from config entry
-        current: list[str] = list(self._config_entry.data.get(CONF_PAIRED_DEVICES, []))
+        current: list[str] = list(self.config_entry.data.get(CONF_PAIRED_DEVICES, []))
         device_hex = device_code.hex
         updated = [c for c in current if c[:6] != device_hex]
         if len(updated) < len(current):
@@ -1091,11 +1101,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 len(updated),
             )
             self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={**self._config_entry.data, CONF_PAIRED_DEVICES: updated},
+                self.config_entry,
+                data={**self.config_entry.data, CONF_PAIRED_DEVICES: updated},
             )
             self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                self.hass.config_entries.async_reload(self.config_entry.entry_id)
             )
 
     # ------------------------------------------------------------------
@@ -1229,8 +1239,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         Returns dict: success (bool), message (str), device_code (str).
         """
-        from .const import CONF_PAIRED_DEVICES, REMOTE_PAIR_TIMEOUT  # noqa: PLC0415
-        from .protocol import validate_device_code  # noqa: PLC0415
 
         device_code_hex = device_code_hex.upper().strip()
 
@@ -1351,16 +1359,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 device_code_hex,
             )
             current: list[str] = list(
-                self._config_entry.data.get(CONF_PAIRED_DEVICES, [])
+                self.config_entry.data.get(CONF_PAIRED_DEVICES, [])
             )
             if device_code_hex not in {c[:6] for c in current}:
                 current.append(device_code_hex)
                 self.hass.config_entries.async_update_entry(
-                    self._config_entry,
-                    data={**self._config_entry.data, CONF_PAIRED_DEVICES: current},
+                    self.config_entry,
+                    data={**self.config_entry.data, CONF_PAIRED_DEVICES: current},
                 )
                 self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self._config_entry.entry_id)
+                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 )
             return {
                 "success": True,

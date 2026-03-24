@@ -28,7 +28,6 @@ Cover dusk/dawn buttons (appear on each cover device card):
 from __future__ import annotations
 
 import logging
-
 import re
 
 from homeassistant.components.button import ButtonEntity
@@ -42,7 +41,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
-from .coordinator import DuoFernCoordinator, DuoFernData
+from .coordinator import DuoFernCoordinator
 from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)

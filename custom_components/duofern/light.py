@@ -27,7 +27,6 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ColorMode,
     LightEntity,
-    LightEntityFeature,
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
@@ -38,7 +37,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 

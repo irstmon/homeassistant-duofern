@@ -26,11 +26,9 @@ From 30_DUOFERN.pm set definitions and %commands:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from homeassistant.components.number import (
-    NumberDeviceClass,
     NumberEntity,
     NumberEntityDescription,
     NumberMode,
@@ -45,7 +43,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 

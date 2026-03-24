@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
@@ -36,7 +35,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 

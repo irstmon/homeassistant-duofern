@@ -53,7 +53,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
-from .const import DOMAIN, SUN_SENSOR_DEVICE_TYPES, WIND_SENSOR_DEVICE_TYPES
+from .const import DOMAIN
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
 
 _LOGGER = logging.getLogger(__name__)

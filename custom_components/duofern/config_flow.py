@@ -25,7 +25,6 @@ from homeassistant.config_entries import (
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
-    SOURCE_INTEGRATION_DISCOVERY,
 )
 from homeassistant.components import usb
 
@@ -162,13 +161,18 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         Triggered when a device matching our manifest.json usb entry is found:
         VID=0x0403, PID=0x6001, description contains "DuoFern USB-Stick"
         """
-        _LOGGER.info(
+        _LOGGER.debug(
             "USB device discovered: %s (VID=%s, PID=%s, serial=%s)",
             discovery_info.description,
             discovery_info.vid,
             discovery_info.pid,
             discovery_info.serial_number,
         )
+
+        # Set unique_id from USB serial number to prevent duplicate discoveries
+        if discovery_info.serial_number:
+            await self.async_set_unique_id(discovery_info.serial_number)
+            self._abort_if_unique_id_configured()
 
         # Store the discovered port for the user step
         self._discovered_port = discovery_info.device
