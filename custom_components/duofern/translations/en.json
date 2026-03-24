@@ -116,6 +116,9 @@
       },
       "pair_by_code": {
         "name": "Pair by Code"
+      },
+      "stop_pair_unpair": {
+        "name": "Stop Pairing/Unpairing"
       }
     },
     "binary_sensor": {

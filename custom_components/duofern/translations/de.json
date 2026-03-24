@@ -116,6 +116,9 @@
       },
       "pair_by_code": {
         "name": "Gerät per Code anmelden"
+      },
+      "stop_pair_unpair": {
+        "name": "Kopplung/Entkopplung stoppen"
       }
     },
     "binary_sensor": {

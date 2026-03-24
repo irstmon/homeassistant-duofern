@@ -1059,18 +1059,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         from .const import CONF_PAIRED_DEVICES  # noqa: PLC0415
 
-        # Stop unpairing window first (if active)
-        if self.data.unpairing_active:
-            if self._unpairing_task and not self._unpairing_task.done():
-                self._unpairing_task.cancel()
-            self.data.unpairing_active = False
-            self.data.pairing_remaining = 0
-            if self._stick:
-                try:
-                    await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
-                except Exception:
-                    pass
-            self.async_set_updated_data(self.data)
+        # Cancel any running countdown tasks to prevent double reload.
+        # The unpairing countdown (or a stale pairing countdown) may still be
+        # ticking — if it outlives the reload it sends another StopPair/StopUnpair
+        # + state update on the new coordinator instance → 2nd reload.
+        if self._unpairing_task and not self._unpairing_task.done():
+            self._unpairing_task.cancel()
+        self._unpairing_task = None
+        if self._pairing_task and not self._pairing_task.done():
+            self._pairing_task.cancel()
+        self._pairing_task = None
+        self.data.unpairing_active = False
+        self.data.pairing_active = False
+        self.data.pairing_remaining = 0
+        if self._stick:
+            try:
+                await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
+            except Exception:
+                pass
+        self.async_set_updated_data(self.data)
 
         # Remove device from config entry
         current: list[str] = list(self._config_entry.data.get(CONF_PAIRED_DEVICES, []))
@@ -1130,8 +1137,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         finally:
             self._reconnecting = False
 
-    async def _pairing_countdown(self, duration: int) -> None:
-        """Countdown timer for pairing/unpairing UI."""
+    async def _pairing_countdown(self, duration: int, unpairing: bool = False) -> None:
+        """Countdown timer for pairing/unpairing UI.
+
+        Args:
+            duration: countdown in seconds.
+            unpairing: if True, send StopUnpair at timeout; else StopPair.
+        """
         for remaining in range(duration, 0, -1):
             self.data.pairing_remaining = remaining
             self.async_set_updated_data(self.data)
@@ -1140,7 +1152,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.pairing_active = False
         self.data.unpairing_active = False
         if self._stick:
-            await self._stick.send_command(DuoFernEncoder.build_stop_pair())
+            if unpairing:
+                await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
+            else:
+                await self._stick.send_command(DuoFernEncoder.build_stop_pair())
         self.async_set_updated_data(self.data)
 
     # ------------------------------------------------------------------
@@ -1183,7 +1198,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.data.pairing_remaining = duration
         self.async_set_updated_data(self.data)
         self._unpairing_task = self.hass.async_create_task(
-            self._pairing_countdown(duration)
+            self._pairing_countdown(duration, unpairing=True)
         )
         _LOGGER.info("Unpairing started (%ds)", duration)
 
@@ -1291,6 +1306,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 result = "TIMEOUT"
         finally:
             self._pending_pair_future = None
+
+        # Cancel any running pairing countdown task to prevent double reload.
+        # If the user pressed "Start Pairing" before code-pairing, or if
+        # async_start_pairing was called as part of the flow, a countdown task
+        # may still be ticking. If it outlives the reload, it sends another
+        # StopPair + state update on the new coordinator instance → 2nd reload.
+        if self._pairing_task and not self._pairing_task.done():
+            self._pairing_task.cancel()
+            self._pairing_task = None
+        self.data.pairing_active = False
+        self.data.pairing_remaining = 0
 
         # Step 4: Exit pairing mode BEFORE any config persist or reload.
         # This must happen while the stick is still connected.

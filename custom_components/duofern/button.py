@@ -65,6 +65,7 @@ async def async_setup_entry(
     entities: list[ButtonEntity] = [
         DuoFernPairButton(coordinator, system_code_hex),
         DuoFernUnpairButton(coordinator, system_code_hex),
+        DuoFernStopPairUnpairButton(coordinator, system_code_hex),
         DuoFernStatusButton(coordinator, system_code_hex),
         DuoFernPairByCodeButton(coordinator, system_code_hex),
     ]
@@ -227,6 +228,40 @@ class DuoFernUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     async def async_press(self) -> None:
         """Start 60s unpairing window."""
         await self.coordinator.async_start_unpairing()
+
+
+class DuoFernStopPairUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Button to stop an active pairing or unpairing window early.
+
+    Only available (enabled) when pairing_active or unpairing_active is True.
+    Calls async_stop_pairing() or async_stop_unpairing() on the coordinator
+    depending on which mode is active.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "stop_pair_unpair"
+    _attr_icon = "mdi:stop-circle-outline"
+
+    def __init__(self, coordinator: DuoFernCoordinator, system_code_hex: str) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_stop_pair_unpair"
+        self._attr_device_info = _stick_device_info(coordinator, system_code_hex)
+
+    @property
+    def available(self) -> bool:
+        """Only available when a pairing or unpairing window is active."""
+        if self.coordinator.data is None:
+            return False
+        d = self.coordinator.data
+        return d.pairing_active or d.unpairing_active
+
+    async def async_press(self) -> None:
+        """Stop the active pairing or unpairing window."""
+        d = self.coordinator.data
+        if d.unpairing_active:
+            await self.coordinator.async_stop_unpairing()
+        elif d.pairing_active:
+            await self.coordinator.async_stop_pairing()
 
 
 class DuoFernStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
