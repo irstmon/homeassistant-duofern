@@ -184,12 +184,13 @@ One sensor entity per measurement:
 
 ### Stick Control Buttons
 
-Three buttons appear on the **DuoFern Stick device card**:
+These buttons appear on the **DuoFern Stick device card**:
 
 | Button | What it does |
 |--------|-------------|
-| **Start pairing** | Opens a 60-second pairing window. Press the pair button on a new DuoFern device to add it. |
-| **Start unpairing** | Opens a 60-second unpairing window. Press the unpair button on a paired device to remove it. |
+| **Start pairing** | Opens a 60-second pairing window. Press the pair button on a new DuoFern device to add it. The device is auto-added to the config on success. |
+| **Start unpairing** | Opens a 60-second unpairing window. Press the unpair button on a paired device to remove it. The device is auto-removed from the config on success. |
+| **Stop Pairing/Unpairing** | Stops the active pairing or unpairing window early. Only available when a window is open. |
 | **Status Broadcast** | Sends a broadcast status request to all paired devices, refreshing all states in HA. |
 
 ### Pair by Code (Code-Pairing)
@@ -233,6 +234,7 @@ Each paired Handsender or Wandtaster gets a dedicated **EventEntity** in HA. Whe
 - **Last Seen sensor** — every device gets a `Last Seen` timestamp sensor that updates whenever a frame is received, with `RestoreEntity` persistence
 - **Automatic device discovery** *(opt-in)* — unknown devices that send frames but are not yet in your paired list automatically appear in the HA Discovered inbox. Enable under **Settings → Devices & Services → DuoFern → Configure**. See [Automatic Device Discovery](#automatic-device-discovery) below
 - **Auto-add on pairing** — when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
+- **Auto-remove on unpairing** — when a device is unpaired during an active unpairing window, it is automatically removed from the config and the integration reloads
 - **Pair by Code** — pair devices by entering their 6-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
 
 ---

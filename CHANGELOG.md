@@ -19,8 +19,28 @@ Homepilot and our integration using rtl_433 on 434.5 MHz. The key discovery was 
 (the flags byte) controls `pay[0]` in the radio frame — setting it to `0x01` enables pairing mode. This
 byte was undocumented in the FHEM reference implementation, which always uses `0x00`.
 
-Complete pairing sequence: SetPairs (0x03) → StartPair (0x04) → RemotePair ×2 (0x0D with flags=0x01) →
-wait for 0x06 pair response → StopPair (0x05) → persist config → reload integration.
+Complete pairing sequence: SetPairs (0x03) → StartPair (0x04) → CodePair ×2 (0x0D with f[1]=0xFF,
+f[21]=0x01) → wait for 0x06 pair response → StopPair (0x05) → persist config → reload integration.
+
+#### Auto-Unpair
+
+When a device is unpaired during an active unpairing window, it is now automatically removed from the
+config entry and the integration reloads — mirroring the auto-add behaviour of pairing. Previously the
+device code had to be manually removed from the options flow.
+
+Sequence: 0603 unpair response received → StopUnpair (0x08) → remove from config → reload.
+
+#### Stop Pairing/Unpairing Button
+
+New button on the USB stick device card that stops the active pairing or unpairing window early. Only
+available (enabled) when a pairing or unpairing window is currently open.
+
+#### Separate RemotePair and CodePair Commands
+
+`build_remote_pair()` and `build_code_pair()` are now two distinct methods in `protocol.py`. RemotePair
+(FHEM original: f[1]=0x01, f[21]=0x00) tells a device to enter pairing mode over radio. CodePair (new:
+f[1]=0xFF, f[21]=0x01) pairs a device by code. Using the wrong flags byte caused RemotePair to fail —
+discovered by OTA comparison.
 
 ### Bug Fixes
 
@@ -34,6 +54,13 @@ wait for 0x06 pair response → StopPair (0x05) → persist config → reload in
   in pairing mode until the next reconnect. Fixed by separating the code-pairing path: the `0602` pair
   response now only resolves the Future (no reload), and `async_pair_device_by_code` handles the full
   sequence — StopPair first, then persist config, then reload.
+- **Double reload on pair and unpair** — both code-pairing and auto-unpair triggered the integration
+  reload twice. The `_pairing_countdown` timer task continued running after the first reload, sending
+  another StopPair and state update that triggered a second reload. Fixed by cancelling any active
+  countdown tasks before triggering the reload.
+- **Wrong stop command on unpairing timeout** — `_pairing_countdown` always sent `StopPair` (0x05) when
+  the timer expired, even during unpairing. Should have sent `StopUnpair` (0x08). Fixed by adding an
+  `unpairing` parameter to `_pairing_countdown` so the correct stop command is sent.
 
 ---
 
