@@ -54,7 +54,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import translation
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -1222,7 +1222,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
         self.async_set_updated_data(self.data)
 
-    async def async_pair_device_by_code(self, device_code_hex: str) -> dict:
+    async def async_pair_device_by_code(self, device_code_hex: str) -> None:
         """Pair a 6-digit device by sending a remotePair frame directly.
 
         Protocol sequence (OTA-verified against Homepilot):
@@ -1234,38 +1234,33 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           6. Exit pairing mode (0x05 StopPair) — BEFORE config persist/reload
              to avoid race condition where reload disconnects the stick.
           7. CC → persist to config entry, reload integration.
-             AA → device unreachable or not in pairing mode.
-             TIMEOUT → no response within timeout window.
+             AA → raise HomeAssistantError(translation_key="pair_aa").
+             BB → raise HomeAssistantError(translation_key="pair_bb").
+             TIMEOUT → raise HomeAssistantError(translation_key="pair_timeout").
 
-        Returns dict: success (bool), message (str), device_code (str).
+        Raises HomeAssistantError with a translation_key on any failure.
+        Returns None on success (integration reload is scheduled).
         """
 
         device_code_hex = device_code_hex.upper().strip()
 
         if len(device_code_hex) == 10:
-            return {
-                "success": False,
-                "message": (
-                    "10-digit device codes cannot be actively paired — the "
-                    "rolling-code MAC key is unknown. Pair the device via "
-                    "Homepilot first, then use Auto-Discovery in HA to add it."
-                ),
-                "device_code": device_code_hex,
-            }
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_no_input",
+            )
 
         if not validate_device_code(device_code_hex):
-            return {
-                "success": False,
-                "message": f"Invalid device code '{device_code_hex}'. Must be exactly 6 hex characters.",
-                "device_code": device_code_hex,
-            }
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_no_input",
+            )
 
         if self._stick is None:
-            return {
-                "success": False,
-                "message": "DuoFern stick is not connected.",
-                "device_code": device_code_hex,
-            }
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_no_input",
+            )
 
         device_code = DuoFernId.from_hex(device_code_hex)
 
@@ -1335,23 +1330,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             except Exception:
                 _LOGGER.debug("StopPair failed — stick may be disconnected")
 
-        # Load translations for notification messages.
-        strings = await translation.async_get_translations(
-            self.hass, self.hass.config.language, "exceptions", {DOMAIN}
-        )
-
-        def _t(key: str, **kwargs: object) -> str:
-            """Fetch translated notification message from exceptions block."""
-            raw = strings.get(f"component.{DOMAIN}.exceptions.{key}.message", "")
-            return raw.format(**kwargs) if raw else ""
-
-        def _title(key: str) -> str:
-            """Fetch translated notification title from exceptions block."""
-            return strings.get(
-                f"component.{DOMAIN}.exceptions.{key}_title.message",
-                "DuoFern: Pair by Code",
-            )
-
         # Step 5: Handle result — persist and reload only AFTER StopPair.
         if result == "CC":
             _LOGGER.info(
@@ -1370,43 +1348,30 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 self.hass.async_create_task(
                     self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 )
-            return {
-                "success": True,
-                "title": _title("pair_success"),
-                "message": _t("pair_success", device_code=device_code_hex)
-                or f"Device {device_code_hex} paired successfully.",
-                "device_code": device_code_hex,
-            }
+            return
 
         if result == "AA":
-            return {
-                "success": False,
-                "title": _title("pair_aa"),
-                "message": _t("pair_aa", device_code=device_code_hex)
-                or f"Device {device_code_hex} did not respond (AA).",
-                "device_code": device_code_hex,
-            }
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_aa",
+                translation_placeholders={"device_code": device_code_hex},
+            )
 
         if result == "BB":
-            return {
-                "success": False,
-                "title": _title("pair_bb"),
-                "message": _t("pair_bb", device_code=device_code_hex)
-                or f"Device {device_code_hex} rejected pairing (BB).",
-                "device_code": device_code_hex,
-            }
-
-        return {
-            "success": False,
-            "title": _title("pair_timeout"),
-            "message": _t(
-                "pair_timeout",
-                device_code=device_code_hex,
-                timeout=int(REMOTE_PAIR_TIMEOUT),
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_bb",
+                translation_placeholders={"device_code": device_code_hex},
             )
-            or f"Pairing timeout: {device_code_hex} did not respond within {REMOTE_PAIR_TIMEOUT:.0f}s.",
-            "device_code": device_code_hex,
-        }
+
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="pair_timeout",
+            translation_placeholders={
+                "device_code": device_code_hex,
+                "timeout": str(int(REMOTE_PAIR_TIMEOUT)),
+            },
+        )
 
     async def async_request_all_status(self) -> None:
         """Send status broadcast to all paired devices."""

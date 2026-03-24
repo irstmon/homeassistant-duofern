@@ -28,13 +28,12 @@ Cover dusk/dawn buttons (appear on each cover device card):
 from __future__ import annotations
 
 import logging
-import re
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers import translation
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -789,36 +788,14 @@ class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
             if state:
                 device_code = state.state.strip().upper()
 
-        if not re.match(r"^[0-9A-Fa-f]{6}$", device_code):
-            strings = await translation.async_get_translations(
-                self.hass, self.hass.config.language, "exceptions", {DOMAIN}
+        if (
+            not device_code
+            or len(device_code) != 6
+            or not all(c in "0123456789ABCDEF" for c in device_code)
+        ):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="pair_no_input",
             )
-            key_base = f"component.{DOMAIN}.exceptions"
-            title = strings.get(
-                f"{key_base}.pair_no_input_title.message", "DuoFern: Pair by Code"
-            )
-            message = strings.get(
-                f"{key_base}.pair_no_input.message",
-                "Please enter a valid 6-digit hex device code first (e.g. 40AB12).",
-            )
-            await self.hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": title,
-                    "message": message,
-                    "notification_id": "duofern_pair_by_code_no_input",
-                },
-            )
-            return
 
-        result = await self.coordinator.async_pair_device_by_code(device_code)
-        await self.hass.services.async_call(
-            "persistent_notification",
-            "create",
-            {
-                "title": result.get("title", "DuoFern: Pair by Code"),
-                "message": result["message"],
-                "notification_id": f"duofern_pair_{result['device_code']}",
-            },
-        )
+        await self.coordinator.async_pair_device_by_code(device_code)
