@@ -125,10 +125,10 @@ async def run_pair(args: argparse.Namespace) -> None:
             code = DuoFernDecoder.extract_device_code(frame)
             paired_code.append(code)
             pair_event.set()
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  PAIRED: {code.hex} ({code.device_type_name})")
             print(f"  Raw:    {hex_str}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
         elif DuoFernDecoder.is_status_response(frame):
             # Ignore status responses during pairing
             pass
@@ -173,9 +173,7 @@ async def run_pair(args: argparse.Namespace) -> None:
         while elapsed < timeout:
             wait_time = min(interval, timeout - elapsed)
             try:
-                await asyncio.wait_for(
-                    pair_event.wait(), timeout=wait_time
-                )
+                await asyncio.wait_for(pair_event.wait(), timeout=wait_time)
                 # Device responded!
                 break
             except asyncio.TimeoutError:
@@ -193,8 +191,10 @@ async def run_pair(args: argparse.Namespace) -> None:
             print(f"Next steps:")
             print(f"  1. Add this code to your HA integration:")
             print(f"     Settings -> Devices & Services -> DuoFern -> Configure")
-            print(f"     Add \"{code.hex}\" to the device codes list")
-            print(f"  2. Also add it to PAIRED_DEVICES in this script and test_duofern.py")
+            print(f'     Add "{code.hex}" to the device codes list')
+            print(
+                f"  2. Also add it to PAIRED_DEVICES in this script and test_duofern.py"
+            )
         else:
             print(f"\nNo device responded within {timeout} seconds.")
             print(f"  - Make sure the device is in pairing mode")
@@ -212,6 +212,7 @@ async def run_pair(args: argparse.Namespace) -> None:
     except Exception as err:
         print(f"\nERROR: {err}")
         import traceback
+
         traceback.print_exc()
     finally:
         print("\nDisconnecting...")
@@ -236,10 +237,10 @@ async def run_unpair(args: argparse.Namespace) -> None:
             code = DuoFernDecoder.extract_device_code(frame)
             unpaired_code.append(code)
             unpair_event.set()
-            print(f"\n{'='*60}")
+            print(f"\n{'=' * 60}")
             print(f"  UNPAIRED: {code.hex} ({code.device_type_name})")
             print(f"  Raw:      {hex_str}")
-            print(f"{'='*60}")
+            print(f"{'=' * 60}")
         elif DuoFernDecoder.is_status_response(frame):
             pass
         else:
@@ -280,9 +281,7 @@ async def run_unpair(args: argparse.Namespace) -> None:
         while elapsed < timeout:
             wait_time = min(interval, timeout - elapsed)
             try:
-                await asyncio.wait_for(
-                    unpair_event.wait(), timeout=wait_time
-                )
+                await asyncio.wait_for(unpair_event.wait(), timeout=wait_time)
                 break
             except asyncio.TimeoutError:
                 elapsed += wait_time
@@ -299,8 +298,10 @@ async def run_unpair(args: argparse.Namespace) -> None:
             print(f"Next steps:")
             print(f"  1. Remove this code from your HA integration:")
             print(f"     Settings -> Devices & Services -> DuoFern -> Configure")
-            print(f"     Remove \"{code.hex}\" from the device codes list")
-            print(f"  2. Also remove it from PAIRED_DEVICES in this script and test_duofern.py")
+            print(f'     Remove "{code.hex}" from the device codes list')
+            print(
+                f"  2. Also remove it from PAIRED_DEVICES in this script and test_duofern.py"
+            )
         else:
             print(f"\nNo device responded within {timeout} seconds.")
             print(f"  - Make sure the device is in unpairing mode")
@@ -315,6 +316,7 @@ async def run_unpair(args: argparse.Namespace) -> None:
     except Exception as err:
         print(f"\nERROR: {err}")
         import traceback
+
         traceback.print_exc()
     finally:
         print("\nDisconnecting...")
@@ -377,9 +379,9 @@ async def run_list(args: argparse.Namespace) -> None:
         await asyncio.sleep(wait_time)
 
         # Display results
-        print(f"{'='*72}")
+        print(f"{'=' * 72}")
         print(f"  {'Code':<8} {'Type':<22} {'Position':<10} {'Version':<8} {'Status'}")
-        print(f"  {'-'*8} {'-'*22} {'-'*10} {'-'*8} {'-'*12}")
+        print(f"  {'-' * 8} {'-' * 22} {'-' * 10} {'-' * 8} {'-' * 12}")
 
         for device_hex in PAIRED_DEVICES:
             device_hex_upper = device_hex.upper()
@@ -397,17 +399,22 @@ async def run_list(args: argparse.Namespace) -> None:
                 if status.sun_automatic:
                     flags.append("sun")
                 flag_str = ", ".join(flags) if flags else "ok"
-                print(f"  {code.hex:<8} {code.device_type_name:<22} {pos_str:<10} {ver_str:<8} {flag_str}")
+                print(
+                    f"  {code.hex:<8} {code.device_type_name:<22} {pos_str:<10} {ver_str:<8} {flag_str}"
+                )
             else:
                 device_id = DuoFernId.from_hex(device_hex)
-                print(f"  {device_hex_upper:<8} {device_id.device_type_name:<22} {'--':<10} {'--':<8} NO RESPONSE")
+                print(
+                    f"  {device_hex_upper:<8} {device_id.device_type_name:<22} {'--':<10} {'--':<8} NO RESPONSE"
+                )
 
-        print(f"{'='*72}")
+        print(f"{'=' * 72}")
         print(f"\n  {len(received_devices)}/{len(PAIRED_DEVICES)} devices responded")
 
     except Exception as err:
         print(f"\nERROR: {err}")
         import traceback
+
         traceback.print_exc()
     finally:
         print("\nDisconnecting...")
@@ -451,23 +458,27 @@ Examples:
         help="Command to execute",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         default=DEFAULT_SERIAL_PORT,
         help=f"Serial port (default: {DEFAULT_SERIAL_PORT})",
     )
     parser.add_argument(
-        "--system-code", "-s",
+        "--system-code",
+        "-s",
         default=DEFAULT_SYSTEM_CODE,
         help=f"System code (default: {DEFAULT_SYSTEM_CODE})",
     )
     parser.add_argument(
-        "--timeout", "-t",
+        "--timeout",
+        "-t",
         type=int,
         default=DEFAULT_TIMEOUT,
         help=f"Pairing/unpairing timeout in seconds (default: {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
@@ -493,7 +504,9 @@ Examples:
     )
     if not args.verbose:
         logging.getLogger("custom_components.duofern.stick").setLevel(logging.WARNING)
-        logging.getLogger("custom_components.duofern.protocol").setLevel(logging.WARNING)
+        logging.getLogger("custom_components.duofern.protocol").setLevel(
+            logging.WARNING
+        )
 
     # Run
     if args.command == "pair":

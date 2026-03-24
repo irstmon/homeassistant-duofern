@@ -137,22 +137,22 @@ def on_message(frame: bytearray) -> None:
             return
         _seen_devices.add(dev_key)
         status = DuoFernDecoder.parse_status(frame)
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  STATUS from {device_code.hex} ({device_code.device_type_name})")
         ha_position = 100 - status.position  # HA: 0=closed, 100=open
-        print(f"  Position:    {status.position}%"
-              f" (DuoFern: 0=open, 100=closed)")
-        print(f"  Position:    {ha_position}%"
-              f" (HomeAssistant: 100=open, 0=closed)")
+        print(f"  Position:    {status.position}% (DuoFern: 0=open, 100=closed)")
+        print(f"  Position:    {ha_position}% (HomeAssistant: 100=open, 0=closed)")
         print(f"  Moving:      {status.moving}")
         print(f"  Version:     {status.version}")
-        print(f"  Automatics:  time={status.time_automatic}"
-              f" sun={status.sun_automatic}"
-              f" dawn={status.dawn_automatic}"
-              f" dusk={status.dusk_automatic}")
+        print(
+            f"  Automatics:  time={status.time_automatic}"
+            f" sun={status.sun_automatic}"
+            f" dawn={status.dawn_automatic}"
+            f" dusk={status.dusk_automatic}"
+        )
         print(f"  Manual mode: {status.manual_mode}")
         print(f"  Raw:         {hex_str}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
     elif DuoFernDecoder.is_pair_response(frame):
         code = DuoFernDecoder.extract_device_code(frame)
         print(f"  PAIR response from {code.hex}")
@@ -203,7 +203,9 @@ async def send_to_targets(
             pos = args.position
             print(f">> Sending POSITION {pos}% to {device_hex}...")
             frame = DuoFernEncoder.build_cover_command(
-                CoverCommand.POSITION, device_code, system_code,
+                CoverCommand.POSITION,
+                device_code,
+                system_code,
                 position=100 - pos,  # Convert: user says 0=closed, 100=open
             )
             await stick.send_command(frame)
@@ -214,9 +216,7 @@ async def send_to_targets(
             else:
                 _filter_device = None
             print(f">> Requesting status from {device_hex}...")
-            frame = DuoFernEncoder.build_status_request(
-                device_code, system_code
-            )
+            frame = DuoFernEncoder.build_status_request(device_code, system_code)
             await stick.send_command(frame)
 
         # Small delay between commands when sending to multiple devices
@@ -284,7 +284,9 @@ async def run(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     try:
-        if args.command == "statusall" or (args.command == "status" and not args.device):
+        if args.command == "statusall" or (
+            args.command == "status" and not args.device
+        ):
             # Broadcast: status without device or explicit statusall
             _filter_device = None
             print(f">> Broadcasting status request to all devices...")
@@ -299,6 +301,7 @@ async def run(args: argparse.Namespace) -> None:
     except Exception as err:
         print(f"\nERROR: {err}")
         import traceback
+
         traceback.print_exc()
     finally:
         print("\nDisconnecting...")
@@ -343,17 +346,20 @@ Examples:
         help="[device_code] command [position]",
     )
     parser.add_argument(
-        "--port", "-p",
+        "--port",
+        "-p",
         default=DEFAULT_SERIAL_PORT,
         help=f"Serial port (default: {DEFAULT_SERIAL_PORT})",
     )
     parser.add_argument(
-        "--system-code", "-s",
+        "--system-code",
+        "-s",
         default=DEFAULT_SYSTEM_CODE,
         help=f"System code (default: {DEFAULT_SYSTEM_CODE})",
     )
     parser.add_argument(
-        "--verbose", "-v",
+        "--verbose",
+        "-v",
         action="store_true",
         help="Enable debug logging",
     )
@@ -377,9 +383,7 @@ Examples:
             try:
                 position = int(positional[1])
             except ValueError:
-                parser.error(
-                    f"Expected position number, got: {positional[1]}"
-                )
+                parser.error(f"Expected position number, got: {positional[1]}")
         else:
             # "4053B8 up"
             device = positional[0].upper()
@@ -391,17 +395,12 @@ Examples:
         try:
             position = int(positional[2])
         except ValueError:
-            parser.error(
-                f"Expected position number, got: {positional[2]}"
-            )
+            parser.error(f"Expected position number, got: {positional[2]}")
     else:
         parser.error("Too many arguments. Usage: [device_code] command [position]")
 
     if command not in COMMANDS:
-        parser.error(
-            f"Unknown command: {command}. "
-            f"Choose from: {', '.join(COMMANDS)}"
-        )
+        parser.error(f"Unknown command: {command}. Choose from: {', '.join(COMMANDS)}")
 
     # Validate device code if provided
     if device and not validate_device_code(device):
@@ -436,7 +435,9 @@ Examples:
     # Quiet down noisy loggers unless verbose
     if not args.verbose:
         logging.getLogger("custom_components.duofern.stick").setLevel(logging.WARNING)
-        logging.getLogger("custom_components.duofern.protocol").setLevel(logging.WARNING)
+        logging.getLogger("custom_components.duofern.protocol").setLevel(
+            logging.WARNING
+        )
 
     # Run
     asyncio.run(run(args))
