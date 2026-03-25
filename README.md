@@ -46,7 +46,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 | Description | Code | HA Platform | Tested |
 |-------------|------|-------------|:------:|
-| Raumthermostat | `0x73` | `climate` | ❌ |
+| Raumthermostat | `0x73` | `climate` | ✅ |
 | Heizkörperantrieb | `0xE1` | `climate` | ✅ |
 
 ### Sensors & Detectors
@@ -119,11 +119,18 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 ### Climate Entities (Thermostats & Radiator Valves)
 
-- **Target temperature** — set desired temperature (4.0–28.0 °C in 0.5 °C steps)
+- **Target temperature** — set desired temperature (4.0–28.0 °C for HSA and 4.0–40.0 °C for Raumthermostat in 0.5 °C steps)
 - **Current temperature** — measured temperature from the device
 - **HVAC modes** — HEAT and OFF
 - **All readings as attributes** — `temperatureThreshold1–4`, `actTempLimit`, `output`,
   `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `sendingInterval`
+- **Manual Mode / Time Automatic switches** — `manualMode` and `timeAutomatic` are exposed as
+  configuration switch entities for both the Raumthermostat (0x73) and Heizkörperantrieb (0xE1),
+  matching the same switch pattern used for cover and switch devices
+- **Temperature zone buttons** — four buttons ("Activate Zone 1–4") on the Raumthermostat (0x73)
+  device card activate one of the four stored temperature threshold zones. Usable in automations
+  via `button.press`. The threshold values are configurable via the four number sliders
+  (`temperatureThreshold1–4`, 4.0–40.0 °C)
 - **Valve Position sensor** — dedicated sensor entity (0–100 %) for the Heizkörperantrieb (`0xE1`), visible on the device card
 - **Battery sensor** — dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
 - **Window Open Signal switch** — tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C). The switch reflects the **live device state** — the device echoes the last-set value back in every status frame
@@ -169,6 +176,8 @@ Environmental sensor devices expose one or two binary sensor entities depending 
 | Sonnensensor | `0xA5` / `0xAF` | ✅ | — |
 | Sonnen-/Windsensor | `0xA9` | ✅ | ✅ |
 | Markisenwaechter | `0xAA` | — | ✅ |
+
+Sun and wind sensor states are preserved across HA restarts via `RestoreEntity`.
 
 ### Sensor Entities (Weather Station — Umweltsensor 0x69)
 
@@ -219,7 +228,7 @@ Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired
 | **Remote unpair** | All actuators | Remove remote pairing |
 | **Stop remote pairing** | All actuators | End remote pair/unpair window early |
 | **Get status** | All actuators | Request current status from this device |
-| **Temp +** / **Temp −** | Climate | Increment/decrement target temperature by one step |
+| **Activate Zone 1–4** | Raumthermostat (0x73) | Activate one of the four temperature threshold zones (`actTempLimit`) |
 
 ### Remote Control Event Entities
 

@@ -6,7 +6,6 @@ Exposes settings that have discrete options (not on/off, not sliders):
   rainDirection:   up / down                    (Troll, RolloTube)
   automaticClosing: off / 30 / 60 / ... / 240s  (SX5)
   openSpeed:       11 / 15 / 19 (seconds)       (SX5)
-  actTempLimit:    1 / 2 / 3 / 4                (Raumthermostat)
 
 All are placed in entity_category=CONFIG so they appear in the
 "Configuration" section of the device card, not the main dashboard.
@@ -16,14 +15,16 @@ From 30_DUOFERN.pm %commands and set definitions:
   windDirection:up,down  / rainDirection:up,down
   automaticClosing:off,30,60,90,120,150,180,210,240
   openSpeed:11,15,19
-  actTempLimit:1,2,3,4
+
+Note: actTempLimit (Raumthermostat) is exposed as four button entities
+in button.py instead of a select, to avoid the 'always unknown' state
+problem caused by the device not echoing the selected value back.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
@@ -36,7 +37,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -109,18 +109,6 @@ SELECT_DESCRIPTIONS: tuple[DuoFernSelectDescription, ...] = (
         icon="mdi:speedometer",
         device_types=frozenset({0x4E}),
         coordinator_method="async_set_open_speed",
-    ),
-    # --- Raumthermostat ---
-    DuoFernSelectDescription(
-        key="actTempLimit",
-        translation_key="act_temp_limit",
-        reading_key="actTempLimit",
-        name="Active Temp Limit",
-        options=["1", "2", "3", "4"],
-        entity_category=EntityCategory.CONFIG,
-        icon="mdi:thermometer-check",
-        device_types=frozenset({0x73}),
-        coordinator_method="async_set_act_temp_limit",
     ),
     # --- Umweltsensor: transmit interval ---
     DuoFernSelectDescription(

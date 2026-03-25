@@ -90,11 +90,17 @@
       "remote_stop": {
         "name": "Stop Remote (Un)Pairing"
       },
-      "temp_up": {
-        "name": "Temp Up"
+      "act_temp_limit_1": {
+        "name": "Activate Zone 1"
       },
-      "temp_down": {
-        "name": "Temp Down"
+      "act_temp_limit_2": {
+        "name": "Activate Zone 2"
+      },
+      "act_temp_limit_3": {
+        "name": "Activate Zone 3"
+      },
+      "act_temp_limit_4": {
+        "name": "Activate Zone 4"
       },
       "get_status": {
         "name": "Request Status"
@@ -331,15 +337,6 @@
           "19": "19 s"
         }
       },
-      "act_temp_limit": {
-        "name": "Active Temp Limit",
-        "state": {
-          "1": "Zone 1",
-          "2": "Zone 2",
-          "3": "Zone 3",
-          "4": "Zone 4"
-        }
-      },
       "interval": {
         "name": "Transmit Interval",
         "state": {
@@ -442,32 +439,17 @@
     "pair_no_input": {
       "message": "Please enter a valid 6-digit hex device code in the \"Device Code Input\" field first (e.g. 40AB12)."
     },
-    "pair_no_input_title": {
-      "message": "DuoFern: Pair by Code"
-    },
     "pair_success": {
       "message": "Device {device_code} paired successfully."
-    },
-    "pair_success_title": {
-      "message": "DuoFern: Pair by Code"
     },
     "pair_aa": {
       "message": "Device {device_code} did not respond (AA). Ensure it is powered on and in pairing mode (first 2 hours after power-up, or triggered manually)."
     },
-    "pair_aa_title": {
-      "message": "DuoFern: Pair by Code"
-    },
     "pair_bb": {
       "message": "Device {device_code} rejected pairing (BB). It may already be paired to another controller."
     },
-    "pair_bb_title": {
-      "message": "DuoFern: Pair by Code"
-    },
     "pair_timeout": {
       "message": "Pairing timeout: {device_code} did not respond within {timeout}s. Check that the device is in pairing mode."
-    },
-    "pair_timeout_title": {
-      "message": "DuoFern: Pair by Code"
     }
   }
 }

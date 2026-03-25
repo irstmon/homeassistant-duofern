@@ -26,11 +26,9 @@ From 30_DUOFERN.pm set definitions and %commands:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
 
 from homeassistant.components.number import (
-    NumberDeviceClass,
     NumberEntity,
     NumberEntityDescription,
     NumberMode,
@@ -45,7 +43,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -207,7 +204,7 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="temp_threshold_1",
         reading_key="temperatureThreshold1",
         name="Temp Threshold 1",
-        native_min_value=-40,
+        native_min_value=4,
         native_max_value=40,
         native_step=0.5,
         native_unit_of_measurement="°C",
@@ -221,7 +218,7 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="temp_threshold_2",
         reading_key="temperatureThreshold2",
         name="Temp Threshold 2",
-        native_min_value=-40,
+        native_min_value=4,
         native_max_value=40,
         native_step=0.5,
         native_unit_of_measurement="°C",
@@ -235,7 +232,7 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="temp_threshold_3",
         reading_key="temperatureThreshold3",
         name="Temp Threshold 3",
-        native_min_value=-40,
+        native_min_value=4,
         native_max_value=40,
         native_step=0.5,
         native_unit_of_measurement="°C",
@@ -249,7 +246,7 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="temp_threshold_4",
         reading_key="temperatureThreshold4",
         name="Temp Threshold 4",
-        native_min_value=-40,
+        native_min_value=4,
         native_max_value=40,
         native_step=0.5,
         native_unit_of_measurement="°C",

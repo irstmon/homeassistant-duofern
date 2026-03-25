@@ -90,11 +90,17 @@
       "remote_stop": {
         "name": "Fernanmelden/-abmelden stoppen"
       },
-      "temp_up": {
-        "name": "Temperatur erhöhen"
+      "act_temp_limit_1": {
+        "name": "Temperaturbereich 1 aktivieren"
       },
-      "temp_down": {
-        "name": "Temperatur senken"
+      "act_temp_limit_2": {
+        "name": "Temperaturbereich 2 aktivieren"
+      },
+      "act_temp_limit_3": {
+        "name": "Temperaturbereich 3 aktivieren"
+      },
+      "act_temp_limit_4": {
+        "name": "Temperaturbereich 4 aktivieren"
       },
       "get_status": {
         "name": "Status abfragen"
@@ -331,15 +337,6 @@
           "19": "19 s"
         }
       },
-      "act_temp_limit": {
-        "name": "Aktiver Temperaturbereich",
-        "state": {
-          "1": "Bereich 1",
-          "2": "Bereich 2",
-          "3": "Bereich 3",
-          "4": "Bereich 4"
-        }
-      },
       "interval": {
         "name": "Übertragungsintervall",
         "state": {
@@ -442,32 +439,17 @@
     "pair_no_input": {
       "message": "Bitte zuerst einen gültigen 6-stelligen Hex-Gerätecode im Feld \"Gerätecode-Eingabe\" eingeben (z. B. 40AB12)."
     },
-    "pair_no_input_title": {
-      "message": "DuoFern: Gerät per Code anmelden"
-    },
     "pair_success": {
       "message": "Gerät {device_code} erfolgreich angemeldet."
-    },
-    "pair_success_title": {
-      "message": "DuoFern: Gerät per Code anmelden"
     },
     "pair_aa": {
       "message": "Gerät {device_code} hat nicht geantwortet (AA). Bitte sicherstellen, dass das Gerät eingeschaltet und im Anmeldemodus ist (erste 2 Stunden nach dem Einschalten oder manuell ausgelöst)."
     },
-    "pair_aa_title": {
-      "message": "DuoFern: Gerät per Code anmelden"
-    },
     "pair_bb": {
       "message": "Gerät {device_code} hat die Anmeldung abgelehnt (BB). Es ist möglicherweise bereits bei einem anderen Controller angemeldet."
     },
-    "pair_bb_title": {
-      "message": "DuoFern: Gerät per Code anmelden"
-    },
     "pair_timeout": {
       "message": "Timeout: Gerät {device_code} hat nicht innerhalb von {timeout} s geantwortet. Bitte sicherstellen, dass das Gerät im Anmeldemodus ist."
-    },
-    "pair_timeout_title": {
-      "message": "DuoFern: Gerät per Code anmelden"
     }
   }
 }

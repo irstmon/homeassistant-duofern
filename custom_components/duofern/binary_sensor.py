@@ -53,7 +53,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
-from .const import DOMAIN, SUN_SENSOR_DEVICE_TYPES, WIND_SENSOR_DEVICE_TYPES
+from .const import DOMAIN
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
 
 _LOGGER = logging.getLogger(__name__)
@@ -685,7 +685,9 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
 # ---------------------------------------------------------------------------
 
 
-class DuoFernEnvBinarySensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity):
+class DuoFernEnvBinarySensor(
+    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
+):
     """Binary sensor for sun or wind detection events.
 
     Two cases:
@@ -728,8 +730,11 @@ class DuoFernEnvBinarySensor(CoordinatorEntity[DuoFernCoordinator], BinarySensor
         self._is_on: bool = False
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to DuoFern events on the HA event bus."""
+        """Subscribe to DuoFern events and restore last known state."""
         await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state and last_state.state not in ("unknown", "unavailable"):
+            self._is_on = last_state.state == "on"
         self.async_on_remove(
             self.hass.bus.async_listen(DUOFERN_EVENT, self._handle_duofern_event)
         )

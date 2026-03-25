@@ -1,5 +1,73 @@
 # Changelog
 
+## [v2.2.1] — 2026-03-25
+
+### Code Review & HACS Compliance Release + Raumthermostat Improvements
+
+Full code review of the entire integration codebase across 3 sessions, with cross-validation by a second
+independent reviewer. 23 findings identified, 17 resolved. All conformity improvements are non-functional
+for existing devices. This release additionally includes functional improvements for the Raumthermostat
+(0x73), based on first live device testing.
+
+### Raumthermostat (0x73) — First Live Testing
+
+- **Temperature range corrected** — target temperature slider now goes from 4.0 to 40.0 °C (was 28.0 °C),
+  matching the original Rademacher GUI and the actual device range. The Heizkörperantrieb (0xE1) retains
+  its previous 4.0–28.0 °C range unchanged.
+- **Temperature threshold range corrected** — `temperatureThreshold1–4` sliders now range from 4.0 to
+  40.0 °C (was −40.0 to 40.0 °C). Negative threshold values are not valid for this device.
+- **`actTempLimit` replaced with 4 buttons** — the "Active Temp Limit" select entity (which always showed
+  "unknown" because the device does not echo the selected value back) has been replaced by four dedicated
+  buttons: "Activate Zone 1" through "Activate Zone 4". The underlying coordinator command
+  (`async_set_act_temp_limit`) is unchanged — only the UI representation was replaced.
+- **`manualMode` and `timeAutomatic` switches added** — OTA-verified via rtl_433: these are standard
+  automation commands (`0x0806 FD/FE` and `0x0804 FD/FE`), identical to the Cover/Switch pattern. Both
+  switches are now created for the Raumthermostat alongside the existing Heizkörperantrieb switches.
+- **Temp +/− buttons removed** — the increment/decrement buttons have been removed. The target temperature
+  slider is the correct input method, consistent with how the Heizkörperantrieb is handled.
+
+### Improvements
+
+- **ConfigEntryNotReady** — connection failures during setup now raise `ConfigEntryNotReady`, enabling
+  HA's automatic retry with exponential backoff. Previously a generic exception was re-raised.
+- **DataUpdateCoordinator lifecycle** — `config_entry` is now passed to `super().__init__()`, enabling
+  automatic listener cleanup on unload (HA 2024.8+). All references updated from `self._config_entry`
+  to `self.config_entry`.
+- **Task cleanup on disconnect** — `async_disconnect()` now cancels all running tasks (pairing countdown,
+  unpairing countdown, per-device status timeout loops) before disconnecting the stick. Previously these
+  tasks could outlive the unload and cause asyncio warnings on integration reload.
+- **USB discovery unique_id** — `async_step_usb` now sets a `unique_id` from the USB serial number,
+  preventing duplicate discovery entries and correctly suppressing the discovery card when already
+  configured.
+- **Climate entity features** — added `ClimateEntityFeature.TURN_ON` and `TURN_OFF` to `supported_features`
+  as required since HA 2024.2 for entities that offer `HVACMode.OFF`.
+- **HomeAssistantError for pair-by-code** — all pair-by-code error handling now uses `HomeAssistantError`
+  with `translation_key` instead of legacy `persistent_notification` service calls. Errors appear as
+  translated toast messages in the HA UI.
+- **Sun/Wind sensor state restore** — `DuoFernEnvBinarySensor` (sun and wind detection for external
+  sensors and RolloTron Comfort Master) now inherits from `RestoreEntity`, preserving the last known
+  state across HA restarts.
+- **Migration guard** — `async_migrate_entry` now returns `False` for unknown future config versions
+  (downgrade scenario) instead of silently accepting them.
+- **Diagnostics privacy** — `CONF_PAIRED_DEVICES` (physical device codes) is now redacted in the
+  diagnostics download alongside serial port and system code.
+- **CI workflow** — new `release.yaml` GitHub Actions workflow that automatically updates the `version`
+  field in `manifest.json` from the git release tag.
+
+### Code Cleanup
+
+- Removed 15 unused imports across 12 files (verified via AST analysis)
+- Late imports with `# noqa: PLC0415` moved to top-level; duplicate `CONF_PAIRED_DEVICES` imports removed
+- `services.yaml` reduced to schema only — `name` and `description` are now served exclusively from
+  `strings.json` (HA 2024.4+ standard)
+- Hardcoded German string `"Kanal"` replaced with `"Channel"` in multi-channel switch entity names
+- `TYPE_CHECKING` block moved to end of import section (PEP 8 / isort convention)
+- `import re` grouping fixed (no blank line between stdlib imports)
+- USB discovery log level changed from INFO to DEBUG
+- Callback type annotation improved from `object` to `Callable[[DuoFernId], None] | None`
+
+---
+
 ## [v2.2.0] — 2026-03-24
 
 ### New Features

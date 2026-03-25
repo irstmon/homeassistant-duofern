@@ -51,7 +51,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
-from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +86,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Manual Mode",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:account-cog",
-        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
+        device_types=_ALL_ACTUATORS | frozenset({0xE1, 0x73}),
     ),
     DuoFernAutomationSwitchDescription(
         key="timeAutomatic",
@@ -97,7 +96,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Time Automatic",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:clock-check",
-        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
+        device_types=_ALL_ACTUATORS | frozenset({0xE1, 0x73}),
     ),
     DuoFernAutomationSwitchDescription(
         key="dawnAutomatic",
@@ -451,7 +450,7 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
             self._attr_device_class = SwitchDeviceClass.SWITCH
 
         self._channel_label = (
-            f" Kanal {self._channel}"
+            f" Channel {self._channel}"
             if self._channel and self._device_code.has_channels
             else ""
         )

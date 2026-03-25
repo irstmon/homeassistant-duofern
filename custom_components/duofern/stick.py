@@ -31,7 +31,6 @@ from .const import (
     FLUSH_BUFFER_TIMEOUT,
     FRAME_SIZE_BYTES,
     INIT_RETRY_COUNT,
-    REMOTE_PAIR_TIMEOUT,
     SERIAL_BAUDRATE,
 )
 from .protocol import (
