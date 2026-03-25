@@ -86,7 +86,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Manual Mode",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:account-cog",
-        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
+        device_types=_ALL_ACTUATORS | frozenset({0xE1, 0x73}),
     ),
     DuoFernAutomationSwitchDescription(
         key="timeAutomatic",
@@ -96,7 +96,7 @@ AUTOMATION_SWITCH_DESCRIPTIONS: tuple[DuoFernAutomationSwitchDescription, ...] =
         name="Time Automatic",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:clock-check",
-        device_types=_ALL_ACTUATORS | frozenset({0xE1}),
+        device_types=_ALL_ACTUATORS | frozenset({0xE1, 0x73}),
     ),
     DuoFernAutomationSwitchDescription(
         key="dawnAutomatic",

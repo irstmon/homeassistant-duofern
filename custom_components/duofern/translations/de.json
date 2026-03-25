@@ -90,11 +90,17 @@
       "remote_stop": {
         "name": "Fernanmelden/-abmelden stoppen"
       },
-      "temp_up": {
-        "name": "Temperatur erhöhen"
+      "act_temp_limit_1": {
+        "name": "Temperaturbereich 1 aktivieren"
       },
-      "temp_down": {
-        "name": "Temperatur senken"
+      "act_temp_limit_2": {
+        "name": "Temperaturbereich 2 aktivieren"
+      },
+      "act_temp_limit_3": {
+        "name": "Temperaturbereich 3 aktivieren"
+      },
+      "act_temp_limit_4": {
+        "name": "Temperaturbereich 4 aktivieren"
       },
       "get_status": {
         "name": "Status abfragen"
@@ -329,15 +335,6 @@
           "11": "11 s",
           "15": "15 s",
           "19": "19 s"
-        }
-      },
-      "act_temp_limit": {
-        "name": "Aktiver Temperaturbereich",
-        "state": {
-          "1": "Bereich 1",
-          "2": "Bereich 2",
-          "3": "Bereich 3",
-          "4": "Bereich 4"
         }
       },
       "interval": {

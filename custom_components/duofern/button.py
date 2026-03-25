@@ -118,12 +118,13 @@ async def async_setup_entry(
             entities.append(DuoFernRemoteUnpairButton(coordinator, dev_code))
             entities.append(DuoFernRemoteStopButton(coordinator, dev_code))
 
-        # tempUp/tempDown only for 0x73 Raumthermostat (in %setsThermostat).
-        # NOT for 0xE1 HSA — that device uses the climate entity slider via
-        # the HSA pending protocol instead.
+        # actTempLimit buttons (1-4) for 0x73 Raumthermostat.
+        # Each button activates one of the four temperature threshold zones.
+        # The coordinator method async_set_act_temp_limit() is unchanged —
+        # only the UI representation changes (buttons instead of a select).
         if dev_code.device_type == 0x73:
-            entities.append(DuoFernTempUpButton(coordinator, dev_code))
-            entities.append(DuoFernTempDownButton(coordinator, dev_code))
+            for zone in range(1, 5):
+                entities.append(DuoFernActTempLimitButton(coordinator, dev_code, zone))
 
     # Per-device getStatus buttons for all actuators
     for hex_code, device_state in coordinator.data.devices.items():
@@ -530,60 +531,48 @@ class DuoFernRemoteStopButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
 
 
 # ---------------------------------------------------------------------------
-# Thermostat temp up / temp down buttons
+# Thermostat temperature zone buttons (actTempLimit 1–4)
 # ---------------------------------------------------------------------------
 
 
-class DuoFernTempUpButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
-    """Increment thermostat target temperature by one step.
+class DuoFernActTempLimitButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+    """Activate one of the four temperature threshold zones on the Raumthermostat.
 
-    From 30_DUOFERN.pm: tempUp => {noArg => "0718tt00000000000000"}
-    FHEM command: set DEVICENAME tempUp
+    Sends actTempLimit=N to the device, which makes the thermostat use
+    temperatureThresholdN as its current setpoint source.
+
+    Four separate button entities are created (one per zone), each with a
+    unique translation key (act_temp_limit_1 … act_temp_limit_4).
+    This avoids the 'always unknown' problem of the former SelectEntity —
+    the coordinator method async_set_act_temp_limit() is unchanged.
+
+    From 30_DUOFERN.pm %setsThermostat:
+      actTempLimit:1,2,3,4
     """
 
     _attr_has_entity_name = True
-    _attr_translation_key = "temp_up"
-    _attr_icon = "mdi:thermometer-plus"
+    _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
         self,
         coordinator: DuoFernCoordinator,
         device_code: DuoFernId,
+        zone: int,
     ) -> None:
         super().__init__(coordinator)
         self._device_code = device_code
+        self._zone = zone
         hex_code = device_code.full_hex
-        self._attr_unique_id = f"{DOMAIN}_{hex_code}_temp_up"
+        self._attr_unique_id = f"{DOMAIN}_{hex_code}_act_temp_limit_{zone}"
+        self._attr_translation_key = f"act_temp_limit_{zone}"
+        self._attr_icon = f"mdi:thermometer-{['low', 'low', 'high', 'high'][zone - 1]}"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
     async def async_press(self) -> None:
-        await self.coordinator.async_temp_up(self._device_code)
-
-
-class DuoFernTempDownButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
-    """Decrement thermostat target temperature by one step.
-
-    From 30_DUOFERN.pm: tempDown => {noArg => "0719tt00000000000000"}
-    FHEM command: set DEVICENAME tempDown
-    """
-
-    _attr_has_entity_name = True
-    _attr_translation_key = "temp_down"
-    _attr_icon = "mdi:thermometer-minus"
-
-    def __init__(
-        self,
-        coordinator: DuoFernCoordinator,
-        device_code: DuoFernId,
-    ) -> None:
-        super().__init__(coordinator)
-        self._device_code = device_code
-        hex_code = device_code.full_hex
-        self._attr_unique_id = f"{DOMAIN}_{hex_code}_temp_down"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
-
-    async def async_press(self) -> None:
-        await self.coordinator.async_temp_down(self._device_code)
+        """Activate this temperature zone on the thermostat."""
+        await self.coordinator.async_set_act_temp_limit(
+            self._device_code, str(self._zone)
+        )
 
 
 # ---------------------------------------------------------------------------

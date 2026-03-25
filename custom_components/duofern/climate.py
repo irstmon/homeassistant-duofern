@@ -55,9 +55,13 @@ from .coordinator import DuoFernCoordinator, DuoFernDeviceState
 
 _LOGGER = logging.getLogger(__name__)
 
-# Temperature range from 30_DUOFERN.pm $tempSetList: 4.0 .. 28.0 in 0.5 steps
+# Temperature range for Heizkörperantrieb (0xE1): 4.0 .. 28.0 in 0.5 steps.
+# From 30_DUOFERN.pm $tempSetList.
 TEMP_MIN = 4.0
-TEMP_MAX = 28.0
+TEMP_MAX_HSA = 28.0
+# Temperature range for Raumthermostat (0x73): 4.0 .. 40.0 in 0.5 steps.
+# The wall thermostat GUI and original Rademacher app show 4-40°C.
+TEMP_MAX_THERMOSTAT = 40.0
 TEMP_STEP = 0.5
 
 _SKIP_AS_ATTRIBUTE = {"desired-temp", "measured-temp", "measured-temp2"}
@@ -103,10 +107,10 @@ class DuoFernClimate(
       OFF:  manualMode=on with desired-temp at minimum (FHEM behaviour)
 
     From 30_DUOFERN.pm %setsThermostat:
-      desired-temp:$tempSetList  — set target temperature (4.0-28.0°C)
+      desired-temp:$tempSetList  — 4.0-28.0°C (0xE1), 4.0-40.0°C (0x73)
       manualMode:on,off          — bypass timer program
       timeAutomatic:on,off       — enable/disable timer
-      temperatureThreshold1-4    — zone thresholds
+      temperatureThreshold1-4    — zone thresholds (4.0-40.0°C)
       actTempLimit:1,2,3,4       — active threshold selection
     """
 
@@ -121,7 +125,6 @@ class DuoFernClimate(
     )
     _attr_target_temperature_step = TEMP_STEP
     _attr_min_temp = TEMP_MIN
-    _attr_max_temp = TEMP_MAX
 
     def __init__(
         self,
@@ -133,6 +136,12 @@ class DuoFernClimate(
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}"
+        # 0x73 Raumthermostat: 4-40°C; 0xE1 Heizkörperantrieb: 4-28°C (FHEM $tempSetList)
+        self._attr_max_temp = (
+            TEMP_MAX_THERMOSTAT
+            if self._device_code.device_type == 0x73
+            else TEMP_MAX_HSA
+        )
         # Restored values — shown in GUI until first live frame arrives.
         # Never sent to the device; overwritten by coordinator updates.
         self._restored_desired_temp: float | None = None
@@ -253,12 +262,14 @@ class DuoFernClimate(
         the next status response to confirm.
 
         From 30_DUOFERN.pm %setsThermostat:
-          desired-temp:$tempSetList (4.0-28.0°C in 0.5°C steps)
+          desired-temp:$tempSetList (4.0-28.0°C for 0xE1, 4.0-40.0°C for 0x73)
         """
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
-        temp = max(TEMP_MIN, min(TEMP_MAX, round(temp / TEMP_STEP) * TEMP_STEP))
+        temp = max(
+            TEMP_MIN, min(self._attr_max_temp, round(temp / TEMP_STEP) * TEMP_STEP)
+        )
         await self.coordinator.async_set_desired_temp(self._device_code, temp)
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
