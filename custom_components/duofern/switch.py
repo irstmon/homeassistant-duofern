@@ -450,7 +450,7 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
             self._attr_device_class = SwitchDeviceClass.SWITCH
 
         self._channel_label = (
-            f" Kanal {self._channel}"
+            f" Channel {self._channel}"
             if self._channel and self._device_code.has_channels
             else ""
         )
