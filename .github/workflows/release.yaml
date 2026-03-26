@@ -7,10 +7,6 @@ on:
         description: "Release version (e.g. 2.2.1)"
         required: true
         type: string
-      release_notes:
-        description: "Release notes (Markdown)"
-        required: true
-        type: string
 
 jobs:
   release:
@@ -22,6 +18,15 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check release notes exist
+        run: |
+          if [ ! -f "RELEASE_NOTES.md" ]; then
+            echo "::error::RELEASE_NOTES.md not found. Create it before running this workflow."
+            exit 1
+          fi
+          echo "Release notes:"
+          cat RELEASE_NOTES.md
 
       - name: Update manifest.json version
         run: |
@@ -48,4 +53,4 @@ jobs:
         with:
           tag_name: "v${{ inputs.version }}"
           name: "v${{ inputs.version }}"
-          body: ${{ inputs.release_notes }}
+          body_path: RELEASE_NOTES.md
