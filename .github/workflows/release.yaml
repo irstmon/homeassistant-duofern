@@ -1,12 +1,20 @@
-name: Update version on release
+name: Create Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. 2.2.1)"
+        required: true
+        type: string
+      release_notes:
+        description: "Release notes (Markdown)"
+        required: true
+        type: string
 
 jobs:
-  update-manifest-version:
-    name: Set manifest.json version from release tag
+  release:
+    name: Bump version, tag, and create release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,27 +22,30 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.target_commitish }}
 
-      - name: Get version from tag
-        id: version
+      - name: Update manifest.json version
         run: |
-          TAG="${{ github.event.release.tag_name }}"
-          VERSION="${TAG#v}"
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
-      - name: Update manifest.json
-        run: |
-          jq --arg v "${{ steps.version.outputs.version }}" \
+          jq --arg v "${{ inputs.version }}" \
             '.version = $v' \
             custom_components/duofern/manifest.json > tmp.json \
             && mv tmp.json custom_components/duofern/manifest.json
 
-      - name: Commit and push
+      - name: Commit version bump
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add custom_components/duofern/manifest.json
-          git diff --cached --quiet || git commit -m "chore: bump version to ${{ steps.version.outputs.version }}"
+          git diff --cached --quiet || git commit -m "chore: bump version to ${{ inputs.version }}"
           git push
+
+      - name: Create git tag
+        run: |
+          git tag "v${{ inputs.version }}"
+          git push origin "v${{ inputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ inputs.version }}"
+          name: "v${{ inputs.version }}"
+          body: ${{ inputs.release_notes }}
