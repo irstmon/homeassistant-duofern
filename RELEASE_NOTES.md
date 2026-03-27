@@ -1,5 +1,6 @@
-# Release v2.2.2 — Fix for version number
+# Release v2.2.3
 
 ## Bug Fixes
 
-- **Wrong Version Number:** Release v2.2.1 was still showing v2.2.0 due to an error in the workflow for updating manifest.json
+- Fix cover position settings not being applied correctly and inverted values.
+- Fix SunMode not working for covers.

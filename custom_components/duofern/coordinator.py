@@ -1451,16 +1451,6 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         await self._send_cover(device_code, CoverCommand.DAWN)
         self._set_moving(device_code, "up")
 
-    async def async_cover_sun_mode(self, device_code: DuoFernId, enable: bool) -> None:
-        """Enable/disable sun mode (070801FF / 070A0100).
-
-        From 30_DUOFERN.pm: sunMode on/off
-        """
-        payload = bytes.fromhex(
-            "070801FF000000000000" if enable else "070A0100000000000000"
-        )
-        await self._send_generic(device_code, payload)
-
     async def _send_cover(
         self,
         device_code: DuoFernId,
@@ -1592,6 +1582,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             "rainAutomatic": ("080800FD000000000000", "080800FE000000000000"),
             "dawnAutomatic": ("080900FD000000000000", "080900FE000000000000"),
             "sunAutomatic": ("080100FD000000000000", "080100FE000000000000"),
+            "sunMode": ("070801FF000000000000", "070A0100000000000000"),
             "ventilatingMode": ("080200FD000000000000", "080200FE000000000000"),
             "stairwellFunction": ("081400FD000000000000", "081400FE000000000000"),
             "blindsMode": ("081100FD000000000000", "081100FE000000000000"),
@@ -1636,7 +1627,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           sunPosition => {cmd => {value => "080100nn000000000000"}, invert => 100}
         nn = 100 - position (inverted)
         """
-        nn = 100 - max(0, min(100, position))
+        nn = 100 - max(0, min(100, int(round(position))))
         payload = bytes.fromhex(f"080100{nn:02x}000000000000")
         await self._send_generic(device_code, payload)
 
@@ -1649,7 +1640,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           ventilatingPosition =>
               {cmd => {value => "080200nn000000000000"}, invert => 100}
         """
-        nn = 100 - max(0, min(100, position))
+        nn = 100 - max(0, min(100, int(round(position))))
         payload = bytes.fromhex(f"080200{nn:02x}000000000000")
         await self._send_generic(device_code, payload)
 
@@ -1661,7 +1652,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm:
           slatPosition => {cmd => {value => "071B00000000nn000000"}}
         """
-        nn = max(0, min(100, position))
+        nn = max(0, min(100, int(round(position))))
         payload = bytes.fromhex(f"071B00000000{nn:02x}000000")
         await self._send_generic(device_code, payload)
 
@@ -1671,7 +1662,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm:
           runningTime => {cmd => {value => "0803nn00000000000000"}}
         """
-        nn = max(0, min(255, value))
+        nn = max(0, min(255, int(round(value))))
         payload = bytes.fromhex(f"0803{nn:02x}00000000000000")
         await self._send_generic(device_code, payload)
 
@@ -1681,7 +1672,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm:
           slatRunTime => {cmd => {value => "0812nn00000000000000"}}
         """
-        nn = max(0, min(50, value))
+        nn = max(0, min(50, int(round(value))))
         payload = bytes.fromhex(f"0812{nn:02x}00000000000000")
         await self._send_generic(device_code, payload)
 
@@ -1693,7 +1684,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm:
           defaultSlatPos => {cmd => {value => "0810nn00000000000000"}}
         """
-        nn = max(0, min(100, position))
+        nn = max(0, min(100, int(round(position))))
         payload = bytes.fromhex(f"0810{nn:02x}00000000000000")
         await self._send_generic(device_code, payload)
 
@@ -1706,7 +1697,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           stairwellTime => {cmd => {value => "08140000wwww00000000"}, multi => 10}
         ww = value * 10 as 16-bit big-endian
         """
-        ww = max(0, min(3200, value)) * 10
+        ww = max(0, min(3200, int(round(value)))) * 10
         payload = bytes.fromhex(f"08140000{ww:04x}00000000")
         await self._send_generic(device_code, payload)
 
@@ -1718,7 +1709,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         From 30_DUOFERN.pm:
           intermediateValue => {cmd => {value => "080200nn000000000000"}}
         """
-        nn = max(0, min(100, value))
+        nn = max(0, min(100, int(round(value))))
         payload = bytes.fromhex(f"080200{nn:02x}000000000000")
         await self._send_generic(device_code, payload)
 

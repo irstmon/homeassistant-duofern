@@ -567,7 +567,11 @@ STATUS_IDS: Final[dict[int, dict]] = {
         "chan": {"01": {"position": 3, "from": 5, "to": 5}},
     },
     109: {"name": "runningTime", "chan": {"01": {"position": 6, "from": 0, "to": 7}}},
-    111: {"name": "sunPosition", "chan": {"01": {"position": 6, "from": 0, "to": 6}}},
+    111: {
+        "name": "sunPosition",
+        "invert": 100,
+        "chan": {"01": {"position": 6, "from": 0, "to": 6}},
+    },
     112: {
         "name": "ventilatingPosition",
         "invert": 100,
