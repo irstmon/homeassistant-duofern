@@ -18,7 +18,7 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 |-------------|------|-------------|:------:|
 | RolloTron Standard | `0x40` | `cover` | ✅ |
 | RolloTron Comfort Slave | `0x41` | `cover` | ❌ |
-| Rohrmotor-Aktor | `0x42` | `cover` | ❌ |
+| Rohrmotor-Aktor | `0x42` | `cover` | ✅ |
 | Rohrmotor Steuerung | `0x47` | `cover` | ❌ |
 | Rohrmotor | `0x49` | `cover` | ✅ |
 | Connect-Aktor | `0x4B` | `cover` | ❌ |
