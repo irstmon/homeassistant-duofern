@@ -1,6 +1,6 @@
-# Release v2.2.3
+# Release v2.2.4
 
 ## Bug Fixes
 
-- Fix cover position settings not being applied correctly and inverted values.
-- Fix SunMode not working for covers.
+- Fix cover running time range: now 2–255 seconds (matching Homepilot).
+- Fix slat run time range: now 0.1–5 seconds in 0.1 s steps (matching Homepilot).

@@ -4,9 +4,9 @@ Exposes settings that are numeric sliders:
   sunPosition          0-100   (covers: all)
   ventilatingPosition  0-100   (covers: all)
   slatPosition         0-100   (covers with blindsMode=on)
-  slatRunTime          0-50    (blinds)
+  slatRunTime          0.1-5   (blinds, step 0.1 s)
   defaultSlatPos       0-100   (blinds)
-  runningTime          0-150   (Troll) / 0-255 (Dimmer)
+  runningTime          2-255   (Troll) / 0-255 (Dimmer)
   stairwellTime        0-3200  (Switch/Dimmer, unit = 100ms)
   intermediateValue    0-100   (Dimmer)
 
@@ -16,9 +16,9 @@ From 30_DUOFERN.pm set definitions and %commands:
   sunPosition:slider,0,1,100  + invert=100
   ventilatingPosition:slider,0,1,100  + invert=100
   slatPosition:slider,0,1,100
-  slatRunTime:slider,0,1,50
+  slatRunTime:slider,0.1,0.1,5
   defaultSlatPos:slider,0,1,100
-  runningTime:slider,0,1,150 (Troll) / slider,0,1,255 (Dimmer)
+  runningTime:slider,2,1,255 (Troll) / slider,0,1,255 (Dimmer)
   stairwellTime:slider,0,10,3200
   intermediateValue:slider,0,1,100
 """
@@ -116,9 +116,9 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="slat_run_time",
         reading_key="slatRunTime",
         name="Slat Run Time",
-        native_min_value=0,
-        native_max_value=50,
-        native_step=1,
+        native_min_value=0.1,
+        native_max_value=5,
+        native_step=0.1,
         native_unit_of_measurement="s",
         entity_category=EntityCategory.CONFIG,
         icon="mdi:timer",
@@ -145,8 +145,8 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         translation_key="running_time_cover",
         reading_key="runningTime",
         name="Running Time",
-        native_min_value=0,
-        native_max_value=150,
+        native_min_value=2,
+        native_max_value=255,
         native_step=1,
         native_unit_of_measurement="s",
         entity_category=EntityCategory.CONFIG,
