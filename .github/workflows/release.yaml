@@ -54,3 +54,16 @@ jobs:
           tag_name: "v${{ inputs.version }}"
           name: "v${{ inputs.version }}"
           body_path: RELEASE_NOTES.md
+
+      - name: Prepare RELEASE_NOTES.md for next release
+        run: |
+          # Increment the patch version (e.g. 2.2.4 -> 2.2.5)
+          IFS='.' read -r major minor patch <<< "${{ inputs.version }}"
+          next_version="${major}.${minor}.$((patch + 1))"
+          printf "# Release v%s\n\n" "$next_version" > RELEASE_NOTES.md
+
+      - name: Commit next release notes
+        run: |
+          git add RELEASE_NOTES.md
+          git diff --cached --quiet || git commit -m "chore: prepare RELEASE_NOTES.md for next release"
+          git push
