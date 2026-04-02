@@ -41,7 +41,7 @@ async def async_setup_entry(
     entities = [DuoFernPairCodeText(coordinator, system_code_hex)]
 
     coordinator.data.registered_unique_ids.update(
-        e._attr_unique_id for e in entities if hasattr(e, "_attr_unique_id")
+        e._attr_unique_id for e in entities if e._attr_unique_id is not None
     )
     async_add_entities(entities)
 

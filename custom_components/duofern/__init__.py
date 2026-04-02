@@ -46,7 +46,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
@@ -144,32 +144,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator
 
-    # Register the pair-by-code service (once per HA instance, not per entry).
-    if not hass.services.has_service(DOMAIN, SERVICE_PAIR_BY_CODE):
+    # Register the pair-by-code service, always with the current coordinator.
+    async def _handle_pair_by_code(call: ServiceCall) -> None:
+        """Handle the pair_device_by_code service call."""
+        await coordinator.async_pair_device_by_code(call.data["device_code"])
 
-        async def _handle_pair_by_code(call: ServiceCall) -> dict:
-            """Handle the pair_device_by_code service call."""
-            result = await coordinator.async_pair_device_by_code(
-                call.data["device_code"]
-            )
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": result.get("title", "DuoFern: Pair by Code"),
-                    "message": result["message"],
-                    "notification_id": f"duofern_pair_{result['device_code']}",
-                },
-            )
-            return result
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_PAIR_BY_CODE,
-            _handle_pair_by_code,
-            schema=PAIR_BY_CODE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PAIR_BY_CODE,
+        _handle_pair_by_code,
+        schema=PAIR_BY_CODE_SCHEMA,
+    )
+    entry.async_on_unload(
+        lambda: hass.services.async_remove(DOMAIN, SERVICE_PAIR_BY_CODE)
+    )
 
     # Register callback so the coordinator can notify us when a brand-new
     # device is paired via the stick's pairing button.  We then persist its

@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.event import EventEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -24,7 +24,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, REMOTE_DEVICE_TYPES
 from . import DuoFernConfigEntry
-from .coordinator import DUOFERN_EVENT, DuoFernCoordinator
+from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ async def async_setup_entry(
     # Register this platform's unique_ids centrally so __init__.py can
     # remove stale entities from previous integration versions.
     coordinator.data.registered_unique_ids.update(
-        e._attr_unique_id for e in entities if hasattr(e, "_attr_unique_id")
+        e._attr_unique_id for e in entities if e._attr_unique_id is not None
     )
     if entities:
         async_add_entities(entities)
@@ -81,7 +81,7 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
         self,
         coordinator: DuoFernCoordinator,
         hex_code: str,
-        device_state,
+        device_state: DuoFernDeviceState,
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
@@ -110,7 +110,7 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
             device_reg.async_update_device(device.id, serial_number=self._hex_code)
 
     @callback
-    def _handle_duofern_event(self, event) -> None:
+    def _handle_duofern_event(self, event: Event) -> None:
         """Handle a duofern_event for this remote."""
         data = event.data
         if data.get("device_code") != self._hex_code:

@@ -1,6 +1,5 @@
 pair_device_by_code:
   fields:
     device_code:
-      required: true
       selector:
         text:

@@ -680,7 +680,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             _dc = DuoFernId.from_hex(event.device_code)
             self._maybe_trigger_discovery(_dc)
         except Exception:
-            pass
+            _LOGGER.debug(
+                "Failed to trigger discovery for sensor event device %s",
+                event.device_code,
+                exc_info=True,
+            )
 
         # Update last_seen
         state = self.data.devices.get(event.device_code)
@@ -1086,7 +1090,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             try:
                 await self._stick.send_command(DuoFernEncoder.build_stop_unpair())
             except Exception:
-                pass
+                _LOGGER.warning(
+                    "Failed to send StopUnpair after unpair response", exc_info=True
+                )
         self.async_set_updated_data(self.data)
 
         # Remove device from config entry
