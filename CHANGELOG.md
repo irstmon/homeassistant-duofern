@@ -1,5 +1,27 @@
 # Changelog
 
+## [v2.2.5] — 2026-05-17
+
+- **Fix 0x49 with firmware < 1.4 always reporting open** - looks like firmware versions
+prior to 1.4 send a 0x2C frame after the movement stops without position bytes.
+
+
+## [v2.2.4] — 2026-03-30
+
+- **Fix cover running time range: now 2–255 seconds (matching Homepilot)**
+
+- **Fix slat run time range: now 0.1–5 seconds in 0.1 s steps (matching Homepilot)**
+
+## [v2.2.3] — 2026-03-27
+
+- **Fix cover position settings not being applied correctly and inverted values**
+
+- **Fix SunMode not working for covers**
+
+## [v2.2.2] — 2026-03-26
+
+This was just a re-publish of v2.2.1 with a fixed version number. A bug in the workflow did not update the version number
+
 ## [v2.2.1] — 2026-03-25
 
 ### Code Review & HACS Compliance Release + Raumthermostat Improvements
