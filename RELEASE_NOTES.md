@@ -1,3 +1,2 @@
-# Release v2.2.6
+# Release v2.2.7
 
-- **Another try to fix 0x49 with firmware < 1.4 always reporting open** - completly ignoring 0x2C frames
