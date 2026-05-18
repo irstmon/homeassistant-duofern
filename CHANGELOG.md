@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.2.6] — 2026-05-18
+
+- **Another try to fix 0x49 with firmware < 1.4 always reporting open** - completly ignoring 0x2C frames.
+
 ## [v2.2.5] — 2026-05-17
 
 - **Fix 0x49 with firmware < 1.4 always reporting open** - looks like firmware versions
