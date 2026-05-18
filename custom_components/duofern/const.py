@@ -396,34 +396,6 @@ STATUS_GROUPS: Final[dict[str, list[int]]] = {
     "27": [160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171],
     "29": [180, 181, 182, 183, 184, 185, 186, 187, 188, 998],
     "2B": [300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313],
-    # Format "2C": used by 0x49 Rohrmotor on firmware <= 1.2 as the movement-end
-    # status frame (sent once the motor stops after reaching the target position).
-    # Firmware 1.4 uses "24" for all frames; firmware 1.1/1.2 uses "24" during
-    # movement and "2C" for the final position report after movement completes.
-    # Confirmed by comparing live captures from firmware 1.4 (format 24 only) vs.
-    # firmware 1.1/1.2 (format 24 mid-move, format 2C on stop).
-    # Frame layout is identical to "24" — same StatusIds apply.
-    "2C": [
-        107,
-        115,
-        116,
-        117,
-        118,
-        119,
-        120,
-        121,
-        122,
-        123,
-        124,
-        125,
-        126,
-        127,
-        140,
-        141,
-        400,
-        402,
-        50,
-    ],
 }
 
 # ---------------------------------------------------------------------------

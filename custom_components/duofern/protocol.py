@@ -861,6 +861,16 @@ class DuoFernDecoder:
             f[3] == 0x2A
         ):  # Device-ACK after boost — ignore (not a parseable status frame)
             return False
+        if f[3] == 0x2C:
+            # Movement-end broadcast from 0x49 Rohrmotor firmware <= 1.2.
+            # Sent once after the motor reaches its target position.
+            # Contains no parseable position data (position bytes always 0x00).
+            # FHEM behaviour (30_DUOFERN.pm line 1159): format "2C" is absent
+            # from %statusGroups, so FHEM silently skips the entire parsing loop
+            # and retains the last known state from the preceding "24" frame.
+            # We do the same: reject the frame here so the coordinator never
+            # calls parse_status() on it and the correct position is preserved.
+            return False
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 
     @staticmethod
