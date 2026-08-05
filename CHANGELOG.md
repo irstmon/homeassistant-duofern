@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.3.5]
+
+- **Fixed: optimistic on/off state after a switch command silently no-op'd for channel-carrying switch types** — `_set_level()`'s optimistic pre-status-frame state update looked the device up by bare `hex`, but `DuoFernSwitch` instances for channel-carrying device types (`0x43`'s channels, and `0x65`/`0x74`'s channel "01" actor) are keyed by `full_hex` (hex + channel) in `self.data.devices`. The lookup by bare `hex` found nothing, so the switch briefly showed the wrong state until the next real status frame arrived. Same class of bug as `_set_moving()`, already fixed the same way in v2.3.4 for covers. `DuoFernSwitch` now also carries the channel-qualified device code so the fix actually applies; channel-less switch types (`0x46`/`0x71`) are unaffected since `full_hex` equals `hex` for them.
+
 ## [v2.3.4] — 2026-08-04
 
 - **Fixed: `triggerSunDirection` angle encoding was wrong for most angle/width combinations** — the formula (translated from FHEM's `wCmds` set handler) used plain integer truncation and a reduction-style clamp for values that overflow the 4-bit angle field. Both were incorrect: Python's `int()` truncates negative intermediate values differently than positive ones (collapsing 22.5° and 45° onto the same internal index), and the real device uses natural 4-bit wraparound, not FHEM's clamp — confirmed by decoding real captured register byte for 22.5°/width 90° (`0xA1`), which the old clamp logic would have corrupted into `0xAD` (292.5°). Fixed with `math.floor()` instead of `int()`, and `& 0x0F` wraparound instead of the clamp. Verified against all 14 confirmed valid Homepilot angles × 4 confirmed valid widths (56 combinations) with zero mismatches, plus all 3 previously-captured real device bytes.

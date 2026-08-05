@@ -718,7 +718,19 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
-        self._device_code = device_state.device_code
+        # Channel-carrying device_code — needed so _set_level (optimistic
+        # UI update after a command) can resolve the correct state entry
+        # via full_hex. Without this, self._device_code stays channel-less
+        # (device_state.device_code never carries one) and full_hex would
+        # equal hex, i.e. no fix at all for channelized switches (0x43's
+        # channels, and since 2026-08-05 also 0x65/0x74's channel "01").
+        # TX (build_switch_command) only reads .raw, so this is harmless
+        # for channel-less switch types (0x46/0x71) and for TX generally.
+        self._device_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.channel
+            else device_state.device_code
+        )
         self._channel = device_state.channel
         self._attr_unique_id = f"{DOMAIN}_{hex_code}"
         self._channel_int = int(self._channel, 16) if self._channel else 1
