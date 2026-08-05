@@ -3241,7 +3241,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             return
         minutes = max(
             1, min(32, minutes)
-        )  # confirmed by Gerald (real Homepilot slider)
+        )  # confirmed by @geraldeberle1234 (real Homepilot slider)
         reg, byte = self._SUN_POS[slot - 1]
         self._set_weather_config_word32(
             state, reg, byte, (minutes - 1) << 19, 0x00F80000
@@ -3255,7 +3255,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             return
         minutes = max(
             1, min(32, minutes)
-        )  # confirmed by Gerald (real Homepilot slider)
+        )  # confirmed by @geraldeberle1234 (real Homepilot slider)
         reg, byte = self._SUN_POS[slot - 1]
         self._set_weather_config_word32(
             state, reg, byte, (minutes - 1) << 24, 0x1F000000
@@ -3303,7 +3303,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         while disabled (device has none to offer); from the register while enabled.
 
         Decode uses modular arithmetic: angle_idx = (center - width_idx) % 16,
-        NOT plain subtraction. Verified against all 3 of Gerald's real captured
+        NOT plain subtraction. Verified against all 3 of @geraldeberle1234's real captured
         bytes (0xA1→22.5°, 0xA2→45°, 0xA3→67.5°, all at width=90°) plus his full
         confirmed list of 14 valid angles × 4 valid widths (56 combinations,
         0 mismatches) — see NOTES.md for the analysis that found this.
@@ -3375,7 +3375,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         wrap naturally via the 4-bit mask — NOT the reduction-style clamp FHEM's
         SET-handler used, which turned out to silently corrupt valid
         angle+width combinations (e.g. angle=22.5°,width=90° encoded wrong and
-        decoded back to 292.5°). Verified byte-exact against Gerald's real
+        decoded back to 292.5°). Verified byte-exact against @geraldeberle1234's real
         device byte for that exact combination (0xA1) and against all 14
         confirmed angles × 4 confirmed widths (56 combinations, 0 mismatches).
         See NOTES.md for the full analysis.
