@@ -1,7 +1,3 @@
-# Release v2.3.5
+# Release v2.3.6
 
-- **Fixed:** switches on channel-carrying devices (`0x43` channels, `0x65`/`0x74` channel "01") could briefly show the wrong on/off state right after being toggled — the optimistic state update looked them up the wrong way. Same bug class as the v2.3.4 cover fix, now closed for switches too.
-
-- **Fixed:** SX5 (garage door) cover card no longer shows automaticClosing, openSpeed, 2000cycleAlarm, backJump, and 10minuteAlarm twice.
-
-- **New:** RolloTron covers (`0x40`/`0x41`/`0x61`) now get an "Obstacle" sensor for use in automations. Thanks to @hipp0o for the frame captures!
+- **Fixed:** setting a temperature on Raumthermostat (0x73) climate devices no longer resets it to 4°C / OFF.

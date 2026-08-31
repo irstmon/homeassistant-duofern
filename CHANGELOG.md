@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.3.6]
+
+### Fixed
+- `build_desired_temp_command` (protocol.py) wrote the desired-temp value (`ww`) to frame bytes 8-9 instead of 7-8 — an off-by-one against the FHEM reference template `"0722tt0000wwww000000"`. This shifted the 16-bit temperature value one byte to the right on the wire, causing the Raumthermostat (0x73) to decode a near-zero raw value and fall back to its frost-protection default (desired-temp=4.0°C, shown as HVACMode.OFF) whenever a temperature was set from the HA climate card. Fixed by writing to f[7]/f[8] instead of f[8]/f[9]. Verified against a real TX/RX capture (device 7396FF) — corrected encoding now reproduces the FHEM-expected frame byte-for-byte for a 17.0°C set-point. build_level_command and build_hsa_command use unrelated code paths and do not share this bug.
+
 ## [v2.3.5]
 
 - **Fixed: optimistic on/off state after a switch command silently no-op'd for channel-carrying switch types** — `_set_level()`'s optimistic pre-status-frame state update looked the device up by bare `hex`, but `DuoFernSwitch` instances for channel-carrying device types (`0x43`'s channels, and `0x65`/`0x74`'s channel "01" actor) are keyed by `full_hex` (hex + channel) in `self.data.devices`. The lookup by bare `hex` found nothing, so the switch briefly showed the wrong state until the next real status frame arrived. Same class of bug as `_set_moving()`, already fixed the same way in v2.3.4 for covers. `DuoFernSwitch` now also carries the channel-qualified device code so the fix actually applies; channel-less switch types (`0x46`/`0x71`) are unaffected since `full_hex` equals `hex` for them.

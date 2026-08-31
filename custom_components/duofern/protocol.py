@@ -675,11 +675,13 @@ class DuoFernEncoder:
         f[2] = 0x07
         f[3] = 0x22
         f[4] = 0x01 if timer else 0x00
-        # ww at bytes 6-7 (offset 6 in payload = frame bytes 8-9)
+        # ww at payload offset 5-6 (template "0722tt0000wwww000000":
+        # 07 22 tt 00 00 ww ww 00 00 00) = frame bytes 7-8, since the
+        # payload starts at f[2].
         ww = int(temp * 10 + 400)
         ww = max(0, min(0xFFFF, ww))
-        f[8] = (ww >> 8) & 0xFF
-        f[9] = ww & 0xFF
+        f[7] = (ww >> 8) & 0xFF
+        f[8] = ww & 0xFF
         f[15:18] = system_code.raw
         f[18:21] = device_code.raw
         return f
