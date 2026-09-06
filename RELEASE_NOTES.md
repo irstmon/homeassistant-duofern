@@ -1,3 +1,3 @@
-# Release v2.3.6
+# Release v2.3.7
 
-- **Fixed:** setting a temperature on Raumthermostat (0x73) climate devices no longer resets it to 4°C / OFF.
+- **Fixed:** startup warnings about deprecated Home Assistant device registry calls (`via_device`, `async_get_device`) — no functional changes.

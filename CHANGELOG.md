@@ -1,5 +1,12 @@
 # Changelog
 
+## [v2.3.7]
+
+### Fixed
+- Replaced all uses of the deprecated `device_registry.async_get_or_create(via_device=...)` pattern with `via_device_id`, following the HA device registry migration (deprecated since 2026.8, removed in 2027.8). The stick's own `DeviceEntry.id`, returned when the USB stick device is created in `__init__.py`, is now stored on the coordinator (`coordinator.stick_device_id`) and referenced by every entity's `DeviceInfo` instead of the identifier-pair lookup. Affected: `binary_sensor.py`, `climate.py`, `cover.py`, `event.py`, `light.py`, `sensor.py`, `switch.py` (13 call sites).
+- Replaced all uses of the deprecated `device_registry.async_get_device(identifiers=...)` with `async_get_device_by_identifier((DOMAIN, hex_code), config_entry_id)`, per the same HA migration. Affected the same 7 entity platform files (9 call sites total), all inside `_handle_coordinator_update`/`async_added_to_hass` sw_version/serial_number sync logic.
+- No functional change to device/entity structure — this is purely an API migration to remove startup deprecation warnings; verified against the official Home Assistant developer blog posts on the device registry single-config-entry migration (2026-07-21) and its follow-up (2026-08-24).
+
 ## [v2.3.6]
 
 ### Fixed

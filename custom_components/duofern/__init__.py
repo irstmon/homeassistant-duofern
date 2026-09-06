@@ -206,13 +206,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # This is required so that child devices can reference it via via_device
     # without triggering a "non existing via_device" warning.
     registry = dr.async_get(hass)
-    registry.async_get_or_create(
+    stick_device = registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, system_code.hex)},
         manufacturer="Rademacher",
         model="DuoFern USB-Stick",
         name=f"DuoFern Stick ({system_code.hex})",
     )
+    # Store the stick's own device-registry id so entity platforms can link
+    # to it via via_device_id instead of the deprecated via_device=(DOMAIN, hex)
+    # identifier pair. We created the device ourselves above, so per HA's
+    # migration guidance we read .id straight off the returned DeviceEntry
+    # instead of doing a second registry lookup.
+    coordinator.stick_device_id = stick_device.id
 
     # Listen for config entry updates (e.g., device list changes via options flow)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

@@ -119,7 +119,7 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
             manufacturer="Rademacher",
             model=self._device_code.device_type_name,
             serial_number=hex_code,
-            via_device=(DOMAIN, coordinator.system_code.hex),
+            via_device_id=coordinator.stick_device_id,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -131,7 +131,9 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
         # Ensure serial_number is always set in device registry,
         # even if device was previously registered without it.
         device_reg = dr.async_get(self.hass)
-        device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+        device = device_reg.async_get_device_by_identifier(
+            (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+        )
         if device and device.serial_number != self._hex_code:
             device_reg.async_update_device(device.id, serial_number=self._hex_code)
 
