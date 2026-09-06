@@ -299,6 +299,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self._paired_devices = paired_devices
         self._stick: DuoFernStick | None = None
 
+        # HA device-registry id of the USB stick's own device entry.
+        # Set once by __init__.py right after the stick device is created via
+        # device_registry.async_get_or_create(), so every entity's DeviceInfo
+        # can link to it with via_device_id instead of the deprecated
+        # via_device=(DOMAIN, hex) identifier pair (HA device registry
+        # migration, deprecated since 2026.8 / removed in 2027.8).
+        self.stick_device_id: str | None = None
+
         self._pairing_task: asyncio.Task[None] | None = None
         self._unpairing_task: asyncio.Task[None] | None = None
 

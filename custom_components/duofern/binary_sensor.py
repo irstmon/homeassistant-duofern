@@ -479,7 +479,7 @@ class DuoFernBinarySensor(
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -488,7 +488,9 @@ class DuoFernBinarySensor(
         state = data.devices.get(self._hex_code) if data else None
         if state and state.status.version:
             device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+            device = device_reg.async_get_device_by_identifier(
+                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+            )
             if device and device.sw_version != state.status.version:
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
@@ -634,7 +636,7 @@ class DuoFernWindowSensor(
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -643,7 +645,9 @@ class DuoFernWindowSensor(
         state = data.devices.get(self._hex_code) if data else None
         if state and state.status.version:
             device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+            device = device_reg.async_get_device_by_identifier(
+                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+            )
             if device and device.sw_version != state.status.version:
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
@@ -743,7 +747,7 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -752,7 +756,9 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
         state = data.devices.get(self._hex_code) if data else None
         if state and state.status.version:
             device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+            device = device_reg.async_get_device_by_identifier(
+                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+            )
             if device and device.sw_version != state.status.version:
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
@@ -849,7 +855,7 @@ class DuoFernEnvBinarySensor(
                 manufacturer="Rademacher",
                 model=self._device_code.device_type_name,
                 serial_number=self._hex_code,
-                via_device=(DOMAIN, self.coordinator.system_code.hex),
+                via_device_id=self.coordinator.stick_device_id,
             )
         # Cover device (0x61): attach to the existing device entry
         return DeviceInfo(

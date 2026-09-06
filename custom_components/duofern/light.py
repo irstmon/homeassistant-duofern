@@ -189,7 +189,7 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -197,7 +197,9 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
         state = self._device_state
         if state and state.status.version:
             device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+            device = device_reg.async_get_device_by_identifier(
+                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+            )
             if device and device.sw_version != state.status.version:
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version

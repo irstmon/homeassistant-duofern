@@ -412,7 +412,7 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -421,7 +421,9 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
         state = data.devices.get(self._hex_code) if data else None
         if state and state.status.version:
             device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device(identifiers={(DOMAIN, self._hex_code)})
+            device = device_reg.async_get_device_by_identifier(
+                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
+            )
             if device and device.sw_version != state.status.version:
                 device_reg.async_update_device(
                     device.id, sw_version=state.status.version
@@ -496,7 +498,7 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -621,7 +623,7 @@ class DuoFernBatterySensor(
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -811,7 +813,7 @@ class DuoFernLastSeenSensor(
             model=self._device_code.device_type_name,
             serial_number=self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device=(DOMAIN, self.coordinator.system_code.hex),
+            via_device_id=self.coordinator.stick_device_id,
         )
 
 
