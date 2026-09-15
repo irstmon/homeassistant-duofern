@@ -2,6 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Version](https://img.shields.io/badge/HA%20Version-%3E%202026.8-18bcf2)](https://github.com/cg-ite/homeassistant-duofern/blob/3b4f84bc6b66122fcf202dac7292ebd7518ff20d/CHANGELOG.md#fixed)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=irstmon&repository=homeassistant-duofern&category=integration)
 
@@ -48,7 +49,7 @@ Go to **Settings → Devices & Services → Add Integration → DuoFern**
 
 Older Homepilot versions showed the system code somewhere in their settings, but as far as we know, **current Homepilot firmware no longer exposes it anywhere in the UI**. If you never used FHEM and can't find the code in an old export, you can't recover the *original* code your devices are currently paired to - there is no way around that.
 
-You can **pick a new System Code yourself and re-pair every device.** A code is valid as long as it follows the same pattern Rademacher itself uses for its dongles: 6 hex characters, starting with `6F`, followed by 4 arbitrary hex digits - e.g. `6FA51C`, `6F0001`, `6FDEAD`. Any value matching that pattern is accepted. **This will not be the same code your devices are already paired to**, so every single device will need to be re-paired from scratch (physical pair-button press, or [Pair by Code](#pair-by-code-code-pairing) if you know the device's own 6-digit code - this does not work for 10-digit codes!) before it responds to this integration.
+You can **pick a new System Code yourself and re-pair every device.** A code is valid as long as it follows the same pattern Rademacher itself uses for its dongles: 6 hex characters, starting with `6F`, followed by 4 arbitrary hex digits - e.g. `6FA51C`, `6F0001`, `6FDEAD`. Any value matching that pattern is accepted. **This will not be the same code your devices are already paired to**, so every single device will need to be re-paired from scratch ([physical pair-button press](#pair-by-set-button-connect-10-digit-covers), or [Pair by Code](#pair-by-code-code-pairing) if you know the device's own 6-digit code - this does not work for 10-digit codes!) before it responds to this integration.
 
 **If Homepilot is still running and you can access it**, you can use remote-pairing for most devices instead of re-pairing everything by hand. Put a device into remote-pairing mode via Homepilot, then - once the stick is set up in HA - put the stick into pairing mode too and add devices one by one this way. A few devices don't have a remote-pair button at all, and even fewer devices don't support being bound to two hubs at once - the Heizkörperantrieb is one such exception. This way, a device ends up paired to both codes you control while Homepilot is still running, before you retire it.
 
@@ -63,10 +64,10 @@ Enter the 6-digit hex codes of your paired DuoFern devices, separated by commas:
 406B2D, 4090AE, 40B690, 436C1A
 ```
 
-These are the device codes from your FHEM configuration (`ATTR device CODE`).
+You can find the device codes in your FHEM configuration (`ATTR device CODE`) or on the enclosed labels. If you have (paired) devices with 10 digits, take only the first 6 digits.
 
 This field is optional - you can leave it empty and finish setup with zero devices, then add them
-afterwards via **Settings → Devices & Services → DuoFern → Configure**, physical pairing, or
+afterwards via **Settings → Devices & Services → DuoFern → Configure**, [physical pairing](#pair-by-set-button-connect-10-digit-covers), or
 [Pair by Code](#pair-by-code-code-pairing). Useful for a from-scratch setup with no FHEM export or
 Homepilot access to read existing codes from - see [I don't have FHEM and can't find my System
 Code anywhere](#i-dont-have-fhem-and-cant-find-my-system-code-anywhere) above.
@@ -154,7 +155,11 @@ Pair DuoFern devices by entering their 6-digit device code - **no physical butto
 
 Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired using button press method.
 
-See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control Event Entities](docs/devices.md#remote-control-event-entities) in the devices reference for the full per-device button and event-entity list.
+### Pair by set button (connect 10-digit covers)
+
+1. Press the physical **set button** on the motor
+2. Press the **"Start pairing"** button  on the **DuoFern Stick device card**
+3. The motor moves up and down briefly to acknowledge the connction
 
 ### General
 
@@ -168,6 +173,9 @@ See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control
 - **Auto-add on pairing** - when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
 - **Auto-remove on unpairing** - when a device is unpaired during an active unpairing window, it is automatically removed from the config and the integration reloads
 - **Pair by Code** - pair devices by entering their 6-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
+
+See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control Event Entities](docs/devices.md#remote-control-event-entities) in the devices reference for the full per-device button and event-entity list.
+
 
 ---
 
