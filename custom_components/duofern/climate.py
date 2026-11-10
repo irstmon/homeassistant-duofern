@@ -39,6 +39,7 @@ from typing import Any
 from homeassistant.components.climate import (
     ClimateEntity,
     ClimateEntityFeature,
+    HVACAction,
     HVACMode,
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
@@ -106,7 +107,7 @@ class DuoFernClimate(
 
     Supports HEAT and OFF modes:
       HEAT: device is controlling temperature (normal operation)
-      OFF:  manualMode=on with desired-temp at minimum (FHEM behaviour)
+      OFF:  desired-temp at minimum (4.0°C); manualMode is not changed
 
     From 30_DUOFERN.pm %setsThermostat:
       desired-temp:$tempSetList  — 4.0-28.0°C (0xE1), 4.0-40.0°C (0x73)
@@ -231,6 +232,22 @@ class DuoFernClimate(
         return HVACMode.HEAT
 
     @property
+    def hvac_action(self) -> HVACAction | None:
+        """Return the current action derived from the "output" reading.
+
+        Only format 27 (0x73) reports "output"; 0xE1 returns None.
+        """
+        state = self._device_state
+        if state is None:
+            return None
+        output = state.status.readings.get("output")
+        if output is None:
+            return None
+        if output == "on":
+            return HVACAction.HEATING
+        return HVACAction.OFF if self.hvac_mode == HVACMode.OFF else HVACAction.IDLE
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return all thermostat/HSA readings as extra state attributes.
 
@@ -277,7 +294,7 @@ class DuoFernClimate(
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set HVAC mode.
 
-        OFF  -> set desired-temp to minimum (4°C) — equivalent to FHEM off
+        OFF  -> set desired-temp to minimum (4°C)
         HEAT -> set desired-temp to a reasonable default (20°C) if currently off
         """
         if hvac_mode == HVACMode.OFF:

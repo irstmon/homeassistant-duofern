@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.3.9]
+
+### Added
+- Raumthermostat (0x73): the climate entity now reports `hvac_action`, so the HA thermostat card and HomeKit (via HomeKit Bridge) show whether the thermostat is currently heating. Derived from the existing `output` reading (format 27, StatusID 166, word position 0, bit 3): `on` → `heating`; `off` → `idle`, or `off` when the target temperature is at the 4.0 °C minimum (HVACMode.OFF). `output` is evaluated first, so a relay switched on while the target is at 4.0 °C (e.g. by the device's frost protection) is still reported as `heating`. Verified with real RX/TX captures from a 0x73 on firmware 2.2 (device 737AF9): the bit changed exactly with the audible relay click in both directions, for set-point changes from HA and from the device keys, with manualMode on and off, and the device broadcasts every change unsolicited within 1-2 s, so no polling is needed. Devices without an `output` reading (0xE1, format 29) return `None`, so their behaviour is unchanged. Thanks @apfelflo89 for the proposal and the detailed frame captures.
+
+### Fixed
+- `climate.py` docstrings described HVACMode.OFF as "manualMode=on with desired-temp at minimum (FHEM behaviour)" and "equivalent to FHEM off". The code only sets desired-temp to 4.0 °C and does not touch manualMode, and FHEM's `%setsThermostat` has no `off` command. Docstrings corrected, no functional change.
+
 ## [v2.3.8]
  
 ### Fixed
