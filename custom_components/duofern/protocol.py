@@ -934,6 +934,15 @@ class DuoFernDecoder:
             # We do the same: reject the frame here so the coordinator never
             # calls parse_status() on it and the correct position is preserved.
             return False
+        if f[3] == 0x26:
+            # Second frame sent by 0x42 Rohrmotor-Aktor (fw 3.3) ~1.3 s after
+            # the 0x23 status reply (dest FFFFFF). Contains no position data.
+            # FHEM behaviour: %statusGroups{"26"} is empty, so no readings and
+            # no state are written and the last state from the "23" frame is
+            # retained. We do the same: reject the frame here so parse_status()
+            # never wipes the state set by the preceding 0x23 frame.
+            # Thanks @apfelflo89 for the analysis and the frame captures.
+            return False
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 
     @staticmethod

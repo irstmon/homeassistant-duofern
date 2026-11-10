@@ -1,3 +1,3 @@
-# Release v2.3.7
-
-- **Fixed:** startup warnings about deprecated Home Assistant device registry calls (`via_device`, `async_get_device`) — no functional changes.
+# Release v2.3.8
+ 
+- **Fixed:** Rohrmotor-Aktor (`0x42`) covers no longer become `unknown` after a status request or a Home Assistant restart. Thanks @apfelflo89 for the analysis and the fix!

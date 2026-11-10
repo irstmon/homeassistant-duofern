@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.3.8]
+ 
+### Fixed
+- Rohrmotor-Aktor (0x42) covers became `unknown` and lost all attributes after every status request, including the status broadcast sent during stick init after a Home Assistant restart. On a status request, 0x42 devices (verified on firmware 3.3) reply with a full `0x23` status frame, followed ~1.3 s later by a second frame of format `0x26` (dest `FFFFFF`, no position data). `DuoFernDecoder.is_status_response()` accepted the `0x26` frame, and since `STATUS_GROUPS["26"]` is empty, `parse_status()` returned an empty `ParsedStatus` that `_handle_status()` stored over the state just set by the `0x23` frame. `is_status_response()` now rejects format `0x26` in the same way as `0x2A` and `0x2C`, so the frame is dropped in `_dispatch()` (no other predicate matches it). This matches FHEM, where `%statusGroups{"26"}` is empty and neither readings nor state are written for that format. Verified with the reported frames (device 42283E): before the change the `0x26` frame produced `position None` and empty readings, after the change it is no longer treated as a status frame while the `0x23` frame still parses fully (position 100, runningTime 20, version 3.3, all automation flags). Thanks @apfelflo89 for the analysis, the frame captures and the tested fix.
+
 ## [v2.3.7]
 
 ### Fixed
