@@ -58,12 +58,18 @@ jobs:
           git tag "v${{ inputs.version }}"
           git push origin "v${{ inputs.version }}"
 
+      - name: Build ZIP asset
+        run: |
+          cd custom_components/duofern
+          zip -r "$GITHUB_WORKSPACE/duofern.zip" . -x "__pycache__/*" "*/__pycache__/*"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ inputs.version }}"
           name: "v${{ inputs.version }}"
           body_path: RELEASE_NOTES.md
+          files: duofern.zip
           prerelease: ${{ inputs.prerelease }}
           make_latest: ${{ inputs.prerelease == true && 'false' || 'true' }}
 
