@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.3.10]
+
+Internal update - no changes
+
 ## [v2.3.9]
 
 ### Added
