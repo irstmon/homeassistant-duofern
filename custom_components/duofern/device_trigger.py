@@ -64,10 +64,8 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     DOMAIN,
-    RAIN_SENSOR_DEVICE_TYPES,
     REMOTE_DEVICE_TYPES,
     SUN_SENSOR_DEVICE_TYPES,
-    TEMP_SENSOR_DEVICE_TYPES,
     WIND_SENSOR_DEVICE_TYPES,
 )
 from .coordinator import DUOFERN_EVENT, DUOFERN_SLOT_EVENT

@@ -579,11 +579,10 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
 #     confirmed against a real Homepilot slider endpoint — safe assumption,
 #     @geraldeberle1234 asked to verify
 #   Sonne "Ab Temperatur von": bit-width + consistent with @geraldeberle1234's screenshots
-#   Sonnenrichtung Zielwinkel: safe assumption (continuous Number with the
-#     22.5° step instead of a fixed option list) — @geraldeberle1234 asked whether 0°/
-#     337.5° are valid Homepilot values or not; using Number here means this
-#     doesn't need to be "right" up front, only the min/max needs revisiting
-#     later if it turns out too narrow or too wide
+#   Sonnenrichtung Zielwinkel / Bereich and Sonnenhöhe are not Numbers:
+#     they are Select entities with fixed option lists, see select.py
+#     (DuoFernSunDirectionAngleSelect, DuoFernSunDirectionWidthSelect,
+#     DuoFernSunHeightTargetSelect, DuoFernSunHeightWidthSelect).
 
 
 @dataclass(frozen=True)

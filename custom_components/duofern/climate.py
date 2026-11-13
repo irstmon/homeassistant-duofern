@@ -17,12 +17,12 @@ Heizkörperantrieb (0xE1) format "29" readings:
   desired-temp, measured-temp, manualMode, timeAutomatic,
   sendingInterval, batteryPercent, valvePosition, forceResponse
 
-  The HSA has a special bidirectional protocol: on receipt of a status
+  The HSA has a special device-initiated protocol: on receipt of a status
   frame, pending set-values are encoded back. FHEM stores these in
-  hash->{helper}{HSAold} and sends them in the next status ACK.
-  We implement a simpler version: desired-temp is sent via the
-  coordinator's async_switch_on/off mechanism, which triggers a
-  status request after ACK.
+  hash->{helper}{HSAold} and sends them with duoSetHSA when the next
+  status frame arrives. The coordinator does the same: changes are queued
+  in DuoFernDeviceState.hsa_pending and sent by _send_hsa_if_pending()
+  when the device checks in with its next status frame.
 
   From 30_DUOFERN.pm:
     #Heizkörperantrieb

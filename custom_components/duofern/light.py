@@ -165,7 +165,9 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
         """
         if ATTR_BRIGHTNESS in kwargs:
             # Convert HA brightness (0-255) to DuoFern level (0-100)
-            level = round(kwargs[ATTR_BRIGHTNESS] * 100 / 255)
+            # Never below 1: brightness 1 would round to level 0, which
+            # switches the dimmer off instead of on.
+            level = max(1, round(kwargs[ATTR_BRIGHTNESS] * 100 / 255))
             await self.coordinator.async_set_level(self._device_code, level)
         else:
             await self.coordinator.async_switch_on(self._device_code)

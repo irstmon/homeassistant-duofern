@@ -14,4 +14,12 @@
 - **Fixed:** motor dead time select shows "short"/"long" instead of "unknown".
 - **Fixed:** Wandtaster actor device no longer offers button triggers that can never fire.
 - **Fixed:** missing names for the rain sensor and the device date/time sensors.
+- **Fixed:** Raumthermostat (`0x73`) "Activate Zone" buttons now send the command in the same form as FHEM.
+- **Fixed:** pair/unpair responses are only accepted while a pairing or unpairing window is open; a device can no longer be removed outside of it.
+- **Fixed:** obstacle / block / light curtain events fire once per occurrence instead of with every status frame.
+- **Fixed:** dimmers no longer switch off when turned on with the lowest brightness.
+- **Fixed:** system and device codes containing spaces are rejected right away; the "Pair by Code" field can be cleared again.
+- **New:** dusk / dawn buttons for dimmers (`0x48`/`0x4A`).
+- **New:** reset buttons for Umweltsensor (`0x69`), Bewegungsmelder (`0x65`) and Wandtaster 6fach 230V (`0x74`).
+- **Changed:** Universalaktor (`0x43`) has its reset buttons only once (channel 01).
 - **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.

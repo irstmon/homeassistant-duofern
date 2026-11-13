@@ -5,7 +5,7 @@ Stick control buttons (appear on the Stick device card):
   - "Start unpairing"  (60s unpairing window, auto-stop)
   - "Status Broadcast" (broadcast status request to all paired devices)
 
-Cover dusk/dawn buttons (appear on each cover device card):
+Dusk/dawn buttons (appear on each cover, switch actor and dimmer device card):
   - "Dusk position"    Move to the device's programmed dusk position
   - "Dawn position"    Move to the device's programmed dawn position
 
@@ -20,8 +20,8 @@ Cover dusk/dawn buttons (appear on each cover device card):
 
   FHEM equivalents: set ROLLONAME dusk / set ROLLONAME dawn
 
-  In FHEM, dusk/dawn are part of %setsBasic (all covers) and
-  %setsSX5 (SX5 garage), and %setsDimmer (dimmers).
+  In FHEM, dusk/dawn are part of %setsDefaultRollerShutter (covers),
+  %setsSwitchActor (switch actors) and %setsDimmer (dimmers).
   In HA they appear as Buttons on the respective device card.
 """
 
@@ -79,7 +79,8 @@ async def async_setup_entry(
             if device_state.channel
             else device_state.device_code
         )
-        if dc.is_cover or dc.is_switch:
+        # Dimmers (0x48/0x4A): %setsDimmer lists "dusk:noArg" and "dawn:noArg".
+        if dc.is_cover or dc.is_switch or dc.is_light:
             entities.append(DuoFernDuskButton(coordinator, dc))
             entities.append(DuoFernDawnButton(coordinator, dc))
         if dc.is_cover:
@@ -97,24 +98,31 @@ async def async_setup_entry(
         # this loop use dev_code.is_* properties, not the raw device_type int.
         # dev_type is only needed in the second loop below (Umweltsensor buttons).
 
-        # reset:settings,full for all devices that support it
-        # From 30_DUOFERN.pm %setsBasic / %setsReset: covers, switches, dimmers
-        # 0xE1 Heizkörperantrieb uses %setsHSA which has no reset commands
-        # 0x69 Umweltsensor is excluded on BOTH channels: channel "00" uses
-        # %setsUmweltsensor00 (no reset), and channel "01" — despite now
-        # matching is_cover — uses %setsDefaultRollerShutter +
-        # %setsUmweltsensor01 + %setsPair, which deliberately omits
-        # %setsBasic/%setsReset (30_DUOFERN.pm line ~624), unlike every
-        # other cover type.
-        # 0x65/0x74 channel "01" is excluded for the identical reason: FHEM
-        # dispatches %setsSwitchActor + %setsPair for it (line ~624), never
-        # %setsBasic/%setsReset — same pattern, different device types.
-        if dev_code.device_type not in (0x65, 0x69, 0x74) and (
-            dev_code.is_cover
-            or dev_code.is_switch
-            or dev_code.is_light
-            or (dev_code.is_climate and dev_code.device_type != 0xE1)
-        ):
+        # reset:settings,full - where FHEM offers %setsBasic / %setsReset:
+        #   covers, switch actors, dimmers, Raumthermostat: %setsBasic
+        #   0xE1 Heizkörperantrieb: %setsHSA, no reset
+        #   0x43 / 0x65 / 0x74 / 0x69: FHEM offers reset once per physical
+        #   device, on the base device (30_DUOFERN.pm):
+        #     %sets = (%setsReset, %setsUmweltsensor)       if CODE =~ /^69....$/
+        #     %sets = (%setsReset, "getStatus:noArg"=> "")  if CODE =~ /^(43|65|74)....$/
+        #   and not on the channel devices (%setsSwitchActor + %setsPair,
+        #   %setsUmweltsensor00, %setsUmweltsensor01). There is no separate
+        #   base device in HA, so the buttons sit on the "00" device of
+        #   0x65/0x69/0x74 and on channel "01" of the Universalaktor (0x43).
+        #   The frame is sent with channel byte 01, as from FHEM's base device.
+        _dt = dev_code.device_type
+        if _dt in (0x65, 0x69, 0x74):
+            _has_reset = dev_code.channel == "00"
+        elif _dt == 0x43:
+            _has_reset = dev_code.channel == "01"
+        else:
+            _has_reset = (
+                dev_code.is_cover
+                or dev_code.is_switch
+                or dev_code.is_light
+                or (dev_code.is_climate and _dt != 0xE1)
+            )
+        if _has_reset:
             entities.append(DuoFernResetSettingsButton(coordinator, dev_code))
             entities.append(DuoFernResetFullButton(coordinator, dev_code))
 

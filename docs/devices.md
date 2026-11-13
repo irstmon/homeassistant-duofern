@@ -102,7 +102,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
 ### Switch Entities (Universalaktor, Steckdosenaktor)
 
 - **On / Off** - standard switch commands
-- **Universalaktor (0x43)** - creates two separate switch entities (one per channel: 01 and 02), both grouped under the same device in HA
+- **Universalaktor (0x43)** - creates two separate devices in HA, one per channel ("Channel 01" and "Channel 02"), each with its own switch entity
 - **All automation flags as attributes** - `dawnAutomatic`, `duskAutomatic`, `sunAutomatic`,
   `timeAutomatic`, `manualMode`, `sunMode`, `stairwellFunction`, `stairwellTime`, `modeChange`
 - **Bewegungsmelder (0x65) / Wandtaster 6fach 230V (0x74) - actor sub-channel "01"** - both devices
@@ -110,6 +110,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
   event sub-channel "00" (motion detection / button presses - see
   [Binary Sensor Entities](#binary-sensor-entities-motion-smoke-contact) and
   [Remote Control Event Entities](#remote-control-event-entities)):
+  - The actor sub-channel has to be paired with the stick separately from the event sub-channel, otherwise it does not react to commands from Home Assistant
   - **On / Off switch**, plus **Dusk / Dawn buttons** (see [Per-Device Buttons](#per-device-buttons))
   - **Stairwell Time number** (0-3200 s)
   - **Automation switches**: `dawnAutomatic`, `duskAutomatic`, `manualMode`, `sunAutomatic`,
@@ -244,11 +245,11 @@ Behaves like a Rohrmotor/Troll cover output, driven by the sub-channel "00" trig
 
 | Button | Devices | What it does |
 |--------|---------|-------------|
-| **Dusk position** | All covers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
-| **Dawn position** | All covers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
+| **Dusk position** | All covers, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
+| **Dawn position** | All covers, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
 | **Toggle** | All covers | Reverse current movement / change direction |
-| **Reset settings** | Covers, switches, dimmers, climate - except the Umweltsensor (0x69) and Bewegungsmelder/Wandtaster 6fach (0x65/0x74) actor sub-channels, which have no reset command | Reset device settings (keeps pairing) |
-| **Full reset** | Covers, switches, dimmers, climate - except the Umweltsensor (0x69) and Bewegungsmelder/Wandtaster 6fach (0x65/0x74) actor sub-channels, which have no reset command | Factory reset (loses pairing) |
+| **Reset settings** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Reset device settings (keeps pairing) |
+| **Full reset** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Factory reset (loses pairing) |
 | **Remote pair** | All actuators | Initiate remote pairing |
 | **Remote unpair** | All actuators | Remove remote pairing |
 | **Stop remote pairing** | All actuators | End remote pair/unpair window early |

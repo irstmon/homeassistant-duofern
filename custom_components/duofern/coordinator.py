@@ -625,6 +625,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # show 28°C permanently.  We restore it below after state.status = parsed.
             prev_desired_temp = state.status.desired_temp
             prev_desired_temp_reading = state.status.readings.get("desired-temp")
+            # Previous readings for the obstacle/block edge detection below.
+            prev_readings = state.status.readings
 
             state.status = parsed
             state.available = True
@@ -690,7 +692,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.status.readings["boostDuration"] = state.pending_boost_duration
 
             # Fire obstacle/block events for automation triggers (e.g. SX5 garage)
-            self._fire_obstacle_events(hex_code, parsed)
+            self._fire_obstacle_events(hex_code, parsed, prev_readings)
 
             # 0xE1 Heizkörperantrieb: device-initiated protocol — send any
             # queued HSA changes now that the device has checked in.
@@ -787,8 +789,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         self.async_set_updated_data(self.data)
 
-    def _fire_obstacle_events(self, hex_code: str, parsed: ParsedStatus) -> None:
+    def _fire_obstacle_events(
+        self,
+        hex_code: str,
+        parsed: ParsedStatus,
+        prev_readings: dict[str, Any] | None = None,
+    ) -> None:
         """Fire HA events for block/obstacle readings so automations can trigger.
+
+        An event is fired once when a reading becomes active (previous value
+        not set or inactive), not again for every further status frame that
+        still reports it. It can fire again after the reading was cleared.
 
         SX5 (0x4E) status frame includes: obstacle, block, lightCurtain.
         These are stored in extra_state_attributes on the CoverEntity AND
@@ -803,7 +814,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         for key in ("obstacle", "block", "lightCurtain"):
             val = parsed.readings.get(key)
-            if val:
+            if val and not (prev_readings or {}).get(key):
                 self.hass.bus.async_fire(
                     DUOFERN_EVENT,
                     {
@@ -1375,6 +1386,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     def _handle_pair_response(self, frame: bytearray) -> None:
         """#Device paired (0602...)."""
         device_code = DuoFernDecoder.extract_device_code(frame)
+        # From 10_DUOFERNSTICK.pm:
+        #   if($rmsg =~ m/0602.{40}/) { Dispatch(...) if ($hash->{pair}); ...
+        # A pair response is only processed while a pairing window (stick
+        # button) or a pair-by-code run is active.
+        if not self.data.pairing_active and self._pending_pair_future is None:
+            _LOGGER.debug(
+                "Pair response (0602) from %s outside a pairing window - ignored",
+                device_code.hex,
+            )
+            return
         _LOGGER.info("Device paired: %s", device_code.hex)
 
         # Resolve pair-by-code future — 0602 is the definitive success signal.
@@ -1413,6 +1434,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Sequence: StopUnpair → remove from config → reload.
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
+        # From 10_DUOFERNSTICK.pm:
+        #   } elsif ($rmsg =~ m/0603.{40}/) { Dispatch(...) if ($hash->{unpair});
+        # An unpair response is only processed while an unpairing window is
+        # active. Without this check a stray 0603 removed the device from the
+        # config entry and reloaded the integration.
+        if not self.data.unpairing_active:
+            _LOGGER.debug(
+                "Unpair response (0603) from %s outside an unpairing window - ignored",
+                device_code.hex,
+            )
+            return
         _LOGGER.info("Device unpaired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
@@ -2203,12 +2235,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           actTempLimit => {1 => "081Ett00001000000000", 2 => "...3000...",
                            3 => "...5000...", 4 => "...7000..."}
         """
-        tt = device_code.raw[0]
+        # "tt" is the timer flag, not the device type. DUOFERN_Set:
+        #   my $timer = "00"; ... $timer = "01" if "timer" argument given
+        #   $buf =~ s/tt/$timer/;
+        # No timer variant is offered here, so tt is always 00.
         mapping = {
-            1: f"081E{tt:02x}00001000000000",
-            2: f"081E{tt:02x}00003000000000",
-            3: f"081E{tt:02x}00005000000000",
-            4: f"081E{tt:02x}00007000000000",
+            1: "081E0000001000000000",
+            2: "081E0000003000000000",
+            3: "081E0000005000000000",
+            4: "081E0000007000000000",
         }
         h = mapping.get(int(value), mapping[1])
         await self._send_generic(device_code, bytes.fromhex(h))
@@ -2263,20 +2298,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         From 30_DUOFERN.pm: tempUp => {noArg => "0718tt00000000000000"}
         """
-        tt = device_code.raw[0]
-        await self._send_generic(
-            device_code, bytes.fromhex(f"0718{tt:02x}00000000000000")
-        )
+        # tt = timer flag (00 = no timer), see async_set_act_temp_limit().
+        await self._send_generic(device_code, bytes.fromhex("07180000000000000000"))
 
     async def async_temp_down(self, device_code: DuoFernId) -> None:
         """Decrement thermostat temperature.
 
         From 30_DUOFERN.pm: tempDown => {noArg => "0719tt00000000000000"}
         """
-        tt = device_code.raw[0]
-        await self._send_generic(
-            device_code, bytes.fromhex(f"0719{tt:02x}00000000000000")
-        )
+        # tt = timer flag (00 = no timer), see async_set_act_temp_limit().
+        await self._send_generic(device_code, bytes.fromhex("07190000000000000000"))
 
     async def async_reset(
         self, device_code: DuoFernId, reset_type: str = "settings"

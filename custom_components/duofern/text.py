@@ -89,7 +89,8 @@ class DuoFernPairCodeText(CoordinatorEntity[DuoFernCoordinator], TextEntity):
         as a safety net and normalise to uppercase.
         """
         value = value.upper().strip()
-        if not re.match(r"^[0-9A-Fa-f]{6}$", value):
+        # An empty value clears the field (allowed by DEVICE_CODE_PATTERN).
+        if value and not re.match(r"^[0-9A-Fa-f]{6}$", value):
             _LOGGER.warning(
                 "Invalid device code entered: %r — must be exactly 6 hex characters",
                 value,
