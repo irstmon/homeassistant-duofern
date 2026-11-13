@@ -2,7 +2,7 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/HA%20Version-%3E%202026.8-18bcf2)](https://github.com/cg-ite/homeassistant-duofern/blob/3b4f84bc6b66122fcf202dac7292ebd7518ff20d/CHANGELOG.md#fixed)
+[![Version](https://img.shields.io/badge/HA%20Version-%3E%202026.8-18bcf2)](https://github.com/irstmon/homeassistant-duofern/blob/main/CHANGELOG.md)
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=irstmon&repository=homeassistant-duofern&category=integration)
 
