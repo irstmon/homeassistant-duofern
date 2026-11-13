@@ -245,9 +245,9 @@ Behaves like a Rohrmotor/Troll cover output, driven by the sub-channel "00" trig
 
 | Button | Devices | What it does |
 |--------|---------|-------------|
-| **Dusk position** | All covers, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
-| **Dawn position** | All covers, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
-| **Toggle** | All covers | Reverse current movement / change direction |
+| **Dusk position** | All covers except SX5, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
+| **Dawn position** | All covers except SX5, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
+| **Toggle** | All covers except SX5 | Reverse current movement / change direction |
 | **Reset settings** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Reset device settings (keeps pairing) |
 | **Full reset** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Factory reset (loses pairing) |
 | **Remote pair** | All actuators | Initiate remote pairing |

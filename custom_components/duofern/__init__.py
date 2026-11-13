@@ -51,7 +51,6 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_call_later
 
 from .const import CONF_DEVICE_CODE, CONF_PAIRED_DEVICES, CONF_SERIAL_PORT, DOMAIN
 from .coordinator import DuoFernCoordinator
@@ -239,13 +238,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # Clean up any devices/entities that were removed from the config
     await _async_cleanup_stale_devices(hass, entry)
 
-    # Second status broadcast after 15s to catch devices that missed the first one.
-    # Some devices don't respond to the initial broadcast during startup.
-    async def _delayed_status_broadcast(_now: object = None) -> None:
-        _LOGGER.debug("Sending delayed startup status broadcast")
-        await coordinator.async_request_all_status()
-
-    entry.async_on_unload(async_call_later(hass, 15, _delayed_status_broadcast))
+    # Devices that did not answer the status broadcast of the stick init are
+    # asked directly after 30 s and once more after 60 s (FHEM behaviour, see
+    # DuoFernCoordinator.async_start_startup_status_poll). The task is
+    # cancelled in coordinator.async_disconnect().
+    coordinator.async_start_startup_status_poll()
 
     return True
 

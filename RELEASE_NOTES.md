@@ -1,4 +1,4 @@
-# Release v2.3.11
+# Release v2.4.0
 
 - **Fixed:** Umweltsensor (`0x69`) weather values and configuration no longer disappear after every status frame of its actor channel.
 - **Fixed:** Wandtaster 6fach 230V (`0x74`): status frames of an unknown format no longer overwrite the relay state with wrong values. Unknown status formats are now ignored for all devices.
@@ -22,4 +22,7 @@
 - **New:** dusk / dawn buttons for dimmers (`0x48`/`0x4A`).
 - **New:** reset buttons for Umweltsensor (`0x69`), Bewegungsmelder (`0x65`) and Wandtaster 6fach 230V (`0x74`).
 - **Changed:** Universalaktor (`0x43`) has its reset buttons only once (channel 01).
+- **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
+- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s.
+- **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
 - **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.

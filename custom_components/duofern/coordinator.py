@@ -65,6 +65,9 @@ from .const import (
     DEVICE_CHANNELS,
     DOMAIN,
     REMOTE_PAIR_TIMEOUT,
+    STARTUP_STATUS_POLL_TYPES,
+    STARTUP_STATUS_RETRY_COUNT,
+    STARTUP_STATUS_TIMEOUT,
     STATUS_RETRY_COUNT,
     STATUS_TIMEOUT,
 )
@@ -152,6 +155,11 @@ class DuoFernDeviceState:
     # here so it can be re-queued if the device responds with an unexpected ACK
     # (e.g. 810100BB — command received but rejected).  Cleared on CC (810003CC).
     boost_retry_pending: str | None = None
+
+    # True while the last duoSetHSA frame was a pure forceResponse reply
+    # (setValue 0, nothing queued). Used to send the stick-unfreeze TX if
+    # the device answers it with BB. Cleared on CC / AA / BB.
+    hsa_force_reply_sent: bool = False
 
     # Set to True after a boost OFF command is accepted (CC).
     # While True, incoming status frames that still show boost active (F0) must
@@ -323,6 +331,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Guard flag to prevent multiple parallel reconnect tasks when the stick
         # sends several NOT_INITIALIZED (81010C55) frames in quick succession.
         self._reconnecting: bool = False
+        # Startup status poll (see async_start_startup_status_poll): 6-digit
+        # codes of devices that have not sent a status frame since startup.
+        self._startup_status_pending: set[str] = set()
+        self._startup_status_task: asyncio.Task[None] | None = None
 
         # Optional callback invoked when a new device is paired via the stick's
         # pairing button. Registered by async_setup_entry in __init__.py so the
@@ -412,6 +424,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Cancel all per-device status timeout tasks
         for state in self.data.devices.values():
             self._cancel_status_timeout(state)
+        # Cancel the startup status poll
+        if self._startup_status_task and not self._startup_status_task.done():
+            self._startup_status_task.cancel()
+        self._startup_status_task = None
+        self._startup_status_pending.clear()
         # Disconnect the stick
         if self._stick:
             await self._stick.disconnect()
@@ -551,6 +568,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         hex_code = device_code.hex
 
         self._maybe_trigger_discovery(device_code)
+        # Any status frame ends the startup poll for this device (FHEM:
+        # "delete $hash->{helper}{timeout}" at the top of the status handler).
+        self._startup_status_pending.discard(hex_code)
         # FHEM only parses a status frame when its format is listed in
         # %statusGroups (30_DUOFERN.pm: "if(exists $statusGroups{$format})").
         # For any other format it still updates "version" and removes the
@@ -978,12 +998,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # Fire startRain/endRain only when the rain bit actually changes.
             # The weather frame arrives about once per minute; firing on every
             # frame made the "rain start"/"rain end" device triggers run every
-            # minute. The very first frame after startup has no previous value
-            # and is not a change, so it fires nothing.
+            # minute. On the first frame after startup there is no previous
+            # value: startRain is fired if it is raining right now, endRain
+            # is not fired (no rain was seen that could have ended).
             prev_raining = r.get("isRaining")
-            rain_changed = prev_raining is not None and bool(prev_raining) != bool(
-                weather.is_raining
-            )
+            if weather.is_raining:
+                rain_changed = not prev_raining
+            else:
+                rain_changed = bool(prev_raining)
             r["isRaining"] = weather.is_raining
             if not rain_changed:
                 pass
@@ -1167,6 +1189,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.boost_off_cooldown = True
                 state.boost_ha_on_pending_f0 = False
             state.boost_retry_pending = None
+            state.hsa_force_reply_sent = False
         if device_code.device_type == 0xE1:
             return
         # Cover devices send their own status frame when movement ends —
@@ -1199,8 +1222,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         state = self.data.devices.get(device_code.hex)
         if state:
             state.available = False
+            state.hsa_force_reply_sent = False
         self.async_set_updated_data(self.data)
         if device_code.device_type == 0xE1:
+            return
+        if device_code.hex in self._startup_status_pending:
+            # MISSING ACK for a startup status poll: the device is marked
+            # unavailable above, but no further poll loop is started. The
+            # startup poll has its own, limited retry count; a device that
+            # is switched off would otherwise be polled every STATUS_TIMEOUT
+            # seconds without end.
             return
         self._start_status_timeout(device_code)
 
@@ -1309,6 +1340,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 return
             self._schedule_hsa_update(device_code, "boostActive", retry_val)
         if device_code.device_type == 0xE1:
+            if state and state.hsa_force_reply_sent:
+                # BB on a reply that was only sent because the device set
+                # forceResponse. After BB the stick stops forwarding RX until
+                # the next TX (see _send_stick_unfreeze).
+                state.hsa_force_reply_sent = False
+                self.hass.async_create_task(self._send_stick_unfreeze(device_code))
             return
         self._start_status_timeout(device_code)
 
@@ -1331,6 +1368,59 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         state.status_timeout_task = self.hass.async_create_task(
             self._status_timeout_loop(device_code)
         )
+
+    def async_start_startup_status_poll(self) -> None:
+        """Start the one-time status poll for devices that stay silent.
+
+        From 30_DUOFERN.pm DUOFERN_Define / DUOFERN_StatusTimeout: every
+        actor gets a 30 s timer with count 2 when it is defined. The timer is
+        removed by the first status frame from the device. If it expires,
+        one status request is sent to that device and the timer is started
+        again, until the count is used up.
+
+        The stick init sequence ends with a status broadcast, so most devices
+        report within the first seconds and are never asked again.
+        """
+        self._startup_status_pending = {
+            state.device_code.hex
+            for state in self.data.devices.values()
+            if state.device_code.device_type in STARTUP_STATUS_POLL_TYPES
+        }
+        if self._startup_status_task and not self._startup_status_task.done():
+            self._startup_status_task.cancel()
+        self._startup_status_task = self.hass.async_create_task(
+            self._startup_status_poll()
+        )
+
+    async def _startup_status_poll(self) -> None:
+        """Ask every device without a status frame, at most twice."""
+        try:
+            for attempt in range(1, STARTUP_STATUS_RETRY_COUNT + 1):
+                await asyncio.sleep(STARTUP_STATUS_TIMEOUT)
+                missing = sorted(self._startup_status_pending)
+                if not missing:
+                    return
+                _LOGGER.debug(
+                    "Startup status poll %d/%d for %s",
+                    attempt,
+                    STARTUP_STATUS_RETRY_COUNT,
+                    missing,
+                )
+                for hex_code in missing:
+                    if hex_code in self._startup_status_pending:
+                        await self._send_status_request(DuoFernId.from_hex(hex_code))
+            # Leave time for the replies to the last request before the
+            # pending set is cleared (it suppresses the AA poll loop).
+            await asyncio.sleep(STARTUP_STATUS_TIMEOUT)
+            if self._startup_status_pending:
+                _LOGGER.info(
+                    "No status received after startup from: %s",
+                    sorted(self._startup_status_pending),
+                )
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._startup_status_pending.clear()
 
     def _cancel_status_timeout(self, state: "DuoFernDeviceState") -> None:
         """Cancel any running status-timeout loop for this device.
@@ -2464,7 +2554,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         overwritten with our optimistic pending values.
         """
         state = self.data.devices.get(device_code.hex)
-        if state is None or not state.hsa_pending:
+        if state is None:
+            return
+        # From 30_DUOFERN.pm: if(($setValue + $statusValue{forceResponse}) > 0)
+        # The device can ask for a reply with the forceResponse bit of its
+        # status frame. It then gets a duoSetHSA frame even when nothing is
+        # queued (setValue 0). Without that bit and without queued changes
+        # nothing is sent.
+        force_response = int(device_readings.get("forceResponse") or 0)
+        if not state.hsa_pending and force_response <= 0:
             return
         if self._stick is None:
             return
@@ -2638,13 +2736,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
 
-        # Send HSA frame only if something is pending (mirrors HomePilot behavior).
-        # sv=0 on a plain D3 with nothing pending → BB. Boost frame takes priority,
-        # no second frame is sent after it.
+        # Send HSA frame only if something is pending or the device asked for a
+        # reply (forceResponse, see top of this method). sv=0 on a plain D3
+        # with nothing pending and no forceResponse → BB. Boost frame takes
+        # priority, no second frame is sent after it.
         sent_boost = boost_active_val is not None or boost_duration_val is not None
-        force_response = state.status.readings.get("forceResponse", 0)
-        if not sent_boost and (set_value > 0 or int(force_response or 0) > 0):
+        if not sent_boost and (set_value > 0 or force_response > 0):
             frame = DuoFernEncoder.build_hsa_command(set_value, device_code)
+            # Remember a pure forceResponse reply (nothing queued): if the
+            # device rejects it with BB, _handle_unknown_ack has to send the
+            # stick-unfreeze TX, as it does after a rejected boost frame.
+            state.hsa_force_reply_sent = set_value == 0
             await self._stick.send_command(frame)
             _LOGGER.info(
                 "Sent duoSetHSA to %s: setValue=0x%06X (keys: %s)",

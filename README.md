@@ -164,7 +164,7 @@ Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired
 ### General
 
 - **Push-based, no polling** - devices push status updates; HA reflects changes immediately
-- **Status broadcast on startup** - on integration load, a full status broadcast ensures all device states are current
+- **Status broadcast on startup** - on integration load, a full status broadcast ensures all device states are current; actors that do not answer are asked directly after 30 s and again after 60 s
 - **USB auto-discovery** - the stick is detected automatically via USB VID/PID when plugged in
 - **Network serial support** - connect via `ser2net` using `socket://host:port` (recommended) or `rfc2217://host:port` URLs; useful for virtualised HA environments where the USB stick is on another machine
 - **Battery sensor entity** - all battery-powered devices get a dedicated **Battery** diagnostic sensor entity on the device card. The last known value persists across HA restarts

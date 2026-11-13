@@ -80,10 +80,13 @@ async def async_setup_entry(
             else device_state.device_code
         )
         # Dimmers (0x48/0x4A): %setsDimmer lists "dusk:noArg" and "dawn:noArg".
-        if dc.is_cover or dc.is_switch or dc.is_light:
+        # SX5 (0x4E): %setsSX5 has neither dusk/dawn nor toggle, so the garage
+        # door gets none of the three buttons.
+        _is_sx5 = dc.device_type == 0x4E
+        if (dc.is_cover and not _is_sx5) or dc.is_switch or dc.is_light:
             entities.append(DuoFernDuskButton(coordinator, dc))
             entities.append(DuoFernDawnButton(coordinator, dc))
-        if dc.is_cover:
+        if dc.is_cover and not _is_sx5:
             entities.append(DuoFernToggleButton(coordinator, dc))
 
     # Reset buttons for all actuators (covers, switches, dimmers)
