@@ -158,6 +158,9 @@
       },
       "wind_detected": {
         "name": "Wind detected"
+      },
+      "rain_detected": {
+        "name": "Rain Detected"
       }
     },
     "switch": {
@@ -485,6 +488,12 @@
       },
       "temperature_grenzwerte": {
         "name": "Temperature Trigger Slots"
+      },
+      "device_date": {
+        "name": "Device Date"
+      },
+      "device_time": {
+        "name": "Device Time"
       }
     },
     "text": {
@@ -579,6 +588,9 @@
     },
     "pair_timeout": {
       "message": "Pairing timeout: {device_code} did not respond within {timeout}s. Check that the device is in pairing mode."
+    },
+    "write_config_incomplete": {
+      "message": "Configuration not written: only {received} of 8 register pages have been read from the device. Press \"Get Config\" first, wait until all values are shown, then write again."
     }
   }
 }

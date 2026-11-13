@@ -204,6 +204,12 @@ class DuoFernDeviceState:
     # Only set for 0x69 channel "00"; always empty for all other devices.
     weather_config_registers: dict[int, str] = field(default_factory=dict)
 
+    # Register indexes (0-7) that were actually received from the device in a
+    # getConfig response. weather_config_registers alone cannot tell this:
+    # the local setters create a missing page from all zeros. writeConfig only
+    # runs once all 8 pages are in this set, see async_write_weather_config().
+    weather_config_pages_read: set[int] = field(default_factory=set)
+
     # --- Umweltsensor 0x69 structured trigger GUI (channel "00" only) ---
     #
     # Which of the up to 5 Grenzwerte (trigger slots, 1-5) is currently
@@ -545,6 +551,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         hex_code = device_code.hex
 
         self._maybe_trigger_discovery(device_code)
+        # FHEM only parses a status frame when its format is listed in
+        # %statusGroups (30_DUOFERN.pm: "if(exists $statusGroups{$format})").
+        # For any other format it still updates "version" and removes the
+        # status timer, but leaves all readings untouched.
+        format_known = DuoFernDecoder.has_known_status_format(frame)
         channels = DEVICE_CHANNELS.get(device_code.device_type)
         if channels:
             # Multi-channel device: update each channel with channel-specific parsing
@@ -556,9 +567,23 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     continue
                 any_found = True
                 parsed = DuoFernDecoder.parse_status(frame, channel=ch)
-                state.status = parsed
+                if not format_known or (device_code.device_type == 0x69 and ch == "00"):
+                    # Keep the existing readings and only refresh the firmware
+                    # version (FHEM writes "version" before it looks at the
+                    # format). Two cases end up here:
+                    #  - a status format that is not in STATUS_GROUPS (FHEM
+                    #    skips its whole parsing loop for those), and
+                    #  - the Umweltsensor weather-station channel "00", whose
+                    #    readings come from the weather, time and config
+                    #    frames. The actor status frame only describes
+                    #    channel "01" and must not replace them.
+                    if parsed.version is not None:
+                        state.status.version = parsed.version
+                else:
+                    state.status = parsed
                 state.available = True
                 state.last_seen = dt_util.now().isoformat(timespec="seconds")
+                self._cancel_status_timeout(state)
             if not any_found:
                 _LOGGER.debug(
                     "Status from unknown channel device %s — ignoring", hex_code
@@ -570,7 +595,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             if state is None:
                 _LOGGER.debug("Status from unknown device %s — ignoring", hex_code)
                 return
+            # A status frame arrived: stop the fallback poll loop that was
+            # started after CC/AA (FHEM: RemoveInternalTimer on every status).
+            self._cancel_status_timeout(state)
             parsed = DuoFernDecoder.parse_status(frame)
+
+            if not format_known:
+                # Unknown status format: keep the last known readings, only
+                # refresh version and availability (see format_known above).
+                _LOGGER.debug(
+                    "Status from %s with unknown format 0x%02X - readings kept",
+                    hex_code,
+                    frame[3],
+                )
+                if parsed.version is not None:
+                    state.status.version = parsed.version
+                state.available = True
+                state.last_seen = dt_util.now().isoformat(timespec="seconds")
+                self.async_set_updated_data(self.data)
+                return
 
             # Read boost_active from the PREVIOUS status BEFORE overwriting
             # state.status — otherwise the False→True edge detection below
@@ -921,8 +964,19 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if weather.temperature is not None:
             r["temperature"] = weather.temperature
         if weather.is_raining is not None:
+            # Fire startRain/endRain only when the rain bit actually changes.
+            # The weather frame arrives about once per minute; firing on every
+            # frame made the "rain start"/"rain end" device triggers run every
+            # minute. The very first frame after startup has no previous value
+            # and is not a change, so it fires nothing.
+            prev_raining = r.get("isRaining")
+            rain_changed = prev_raining is not None and bool(prev_raining) != bool(
+                weather.is_raining
+            )
             r["isRaining"] = weather.is_raining
-            if weather.is_raining:
+            if not rain_changed:
+                pass
+            elif weather.is_raining:
                 self.hass.bus.async_fire(
                     DUOFERN_EVENT,
                     {
@@ -1011,6 +1065,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         # Accumulate register pages (FHEM: readingsSingleUpdate ".reg$reg")
         state.weather_config_registers[reg_index] = reg_data
+        state.weather_config_pages_read.add(reg_index)
         _LOGGER.debug(
             "Umweltsensor config register %d received for %s00 (%d/8 pages so far)",
             reg_index,
@@ -1405,12 +1460,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 len(current),
                 len(updated),
             )
+            # The config entry update listener (__init__.py) reloads the
+            # integration on this data change - no explicit second reload.
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 data={**self.config_entry.data, CONF_PAIRED_DEVICES: updated},
-            )
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry.entry_id)
             )
 
     # ------------------------------------------------------------------
@@ -1646,12 +1700,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             )
             if device_code_hex not in {c[:6] for c in current}:
                 current.append(device_code_hex)
+                # The config entry update listener (__init__.py) reloads the
+                # integration on this data change - no explicit second reload.
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
                     data={**self.config_entry.data, CONF_PAIRED_DEVICES: current},
-                )
-                self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 )
             return
 
@@ -1765,9 +1818,35 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_cover_command(
-            command, device_code, self._system_code, position=position
+            command,
+            device_code,
+            self._system_code,
+            channel=self._frame_channel(device_code),
+            position=position,
         )
         await self._stick.send_command(frame)
+
+    @staticmethod
+    def _frame_channel(device_code: DuoFernId, channel: int = 1) -> int:
+        """Return the channel byte (cc) for a command frame.
+
+        From 30_DUOFERN.pm DUOFERN_Set:
+          my $chanNo = "01";
+          $chanNo = $hash->{chanNo} if ($hash->{chanNo});
+          $buf =~ s/cc/$chanNo/;
+        A channel-carrying device code (e.g. Universalaktor 0x43 channel "02")
+        addresses its own channel. Channel-less codes and the "00" sub-channel
+        of 0x65/0x69/0x74 are sent with channel 01, exactly as before this
+        helper existed. An explicitly passed channel other than 1 always wins.
+        """
+        if channel != 1:
+            return channel
+        if device_code.channel in (None, "", "00"):
+            return channel
+        try:
+            return int(device_code.channel, 16)
+        except ValueError:
+            return channel
 
     def _set_moving(self, device_code: DuoFernId, moving: str) -> None:
         """Optimistically set moving state before status arrives.
@@ -1874,7 +1953,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_generic_command(
-            payload, device_code, self._system_code, channel=channel
+            payload,
+            device_code,
+            self._system_code,
+            channel=self._frame_channel(device_code, channel),
         )
         await self._stick.send_command(frame)
 
@@ -2704,7 +2786,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         Reads register pages from state.weather_config_registers (populated by
         _handle_weather_config() on getConfig response and updated locally by
-        async_set_umweltsensor_* methods). Missing pages default to all zeros.
+        async_set_umweltsensor_* methods). Raises HomeAssistantError
+        (write_config_incomplete) unless all 8 pages have been received from
+        the device via getConfig.
 
         Config always lives on channel "00" (weather station sub-device).
         """
@@ -2717,6 +2801,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 "writeConfig: channel 00 state not found for %s", device_code.hex
             )
             return
+        # Refuse to write unless all 8 register pages were read from the
+        # device before. A page that was never received would be sent as all
+        # zeros (or as zeros plus one locally changed field) and would wipe
+        # that part of the configuration stored on the device.
+        missing = sorted(set(range(8)) - state.weather_config_pages_read)
+        if missing:
+            _LOGGER.warning(
+                "writeConfig for %s refused: register pages %s were never read "
+                "from the device - run getConfig first",
+                device_code.hex,
+                missing,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="write_config_incomplete",
+                translation_placeholders={
+                    "received": str(8 - len(missing)),
+                },
+            )
         # Device code at bytes 18-20 (same layout as all other TX frames).
         # raw is 3 bytes; raw[3:6] always returns empty bytes — use raw.hex().
         dev_hex = device_code.raw.hex()

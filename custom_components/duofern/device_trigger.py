@@ -192,7 +192,14 @@ async def async_get_triggers(hass: HomeAssistant, device_id: str) -> list[dict]:
     triggers: list[dict] = []
 
     # --- Remote controls / wall buttons ---
-    if device_type in REMOTE_DEVICE_TYPES:
+    # 0x65/0x74 are registered as two HA devices: "00" (sensor/button events)
+    # and "01" (actor/relay). The button events are only ever fired with the
+    # "00" device code (see _handle_sensor_event in coordinator.py), so the
+    # "01" actor device must not offer these triggers - they would never fire.
+    _is_actor_channel = (
+        device_type in (0x65, 0x74) and len(hex_code) == 8 and hex_code.endswith("01")
+    )
+    if device_type in REMOTE_DEVICE_TYPES and not _is_actor_channel:
         channels = _REMOTE_CHANNELS.get(device_type, ["01"])
         for channel in channels:
             for action in TRIGGER_TYPES:

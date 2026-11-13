@@ -946,6 +946,29 @@ class DuoFernDecoder:
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 
     @staticmethod
+    def has_known_status_format(data: bytes | bytearray | str) -> bool:
+        """True if parse_status() has a real format definition for this frame.
+
+        From 30_DUOFERN.pm:
+          my $format = substr($msg, 6, 2);
+          if(exists $devices{substr($code,0,2)}{format}) { $format = ... }
+          ...
+          if(exists $statusGroups{$format}) { ...parse... }
+        A frame whose format byte is neither listed in STATUS_GROUPS nor
+        replaced by a per-device-type override carries no readings FHEM knows
+        about. _determine_format() falls back to STATUS_FORMAT_DEFAULT for such
+        a frame; the coordinator uses this check to keep the last known
+        readings instead of overwriting them with that fallback parse.
+        """
+        f = DuoFernDecoder._ensure_bytes(data)
+        if len(f) < 18:
+            return False
+        if f[15] in DEVICE_STATUS_FORMAT_OVERRIDE:
+            return True
+        fmt_str = format(f[3], "02X").lstrip("0") or "0"
+        return fmt_str in STATUS_GROUPS
+
+    @staticmethod
     def is_pair_response(data: bytes | bytearray | str) -> bool:
         """#Device paired — if ($msg =~ m/^0602/) { ... }"""
         f = DuoFernDecoder._ensure_bytes(data)
