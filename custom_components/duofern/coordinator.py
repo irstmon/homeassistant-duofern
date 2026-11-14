@@ -1233,7 +1233,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # is switched off would otherwise be polled every STATUS_TIMEOUT
             # seconds without end.
             return
-        self._start_status_timeout(device_code)
+        self._start_status_timeout(device_code, restart=False)
 
     def _handle_not_initialized(self) -> None:
         """Handle NACK 'actor not initialized' frame (81010C55).
@@ -1347,9 +1347,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.hsa_force_reply_sent = False
                 self.hass.async_create_task(self._send_stick_unfreeze(device_code))
             return
-        self._start_status_timeout(device_code)
+        self._start_status_timeout(device_code, restart=False)
 
-    def _start_status_timeout(self, device_code: DuoFernId) -> None:
+    def _start_status_timeout(
+        self, device_code: DuoFernId, restart: bool = True
+    ) -> None:
         """Start the FHEM-style fallback status-poll timer after CC/AA/BB.
 
         From 30_DUOFERN.pm (ACK handler, non-E1):
@@ -1360,9 +1362,22 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Polls the device once every STATUS_TIMEOUT seconds, up to
         STATUS_RETRY_COUNT times, stopping early when a status frame
         arrives (_cancel_status_timeout is called from _handle_status).
+
+        restart=False is used for negative responses (missing ACK 810108AA,
+        BB/DD): a loop that is already running is left alone. Its own status
+        requests are answered with such a response when the device is not
+        reachable; restarting the loop each time would poll the device every
+        STATUS_TIMEOUT seconds without end. This way an unreachable device is
+        asked at most STATUS_RETRY_COUNT times per loop.
         """
         state = self.data.devices.get(device_code.hex)
         if state is None:
+            return
+        if (
+            not restart
+            and state.status_timeout_task is not None
+            and not state.status_timeout_task.done()
+        ):
             return
         self._cancel_status_timeout(state)
         state.status_timeout_task = self.hass.async_create_task(
@@ -1449,6 +1464,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
                 await self._send_status_request(device_code)
+            # Stay alive until the response to the last request has arrived,
+            # so that a missing ACK for it does not start a new loop
+            # (see _start_status_timeout, restart=False).
+            await asyncio.sleep(STATUS_TIMEOUT)
         except asyncio.CancelledError:
             _LOGGER.debug(
                 "Status timeout cancelled for %s (status frame received)",

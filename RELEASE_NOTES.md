@@ -22,6 +22,7 @@
 - **New:** dusk / dawn buttons for dimmers (`0x48`/`0x4A`).
 - **New:** reset buttons for Umweltsensor (`0x69`), Bewegungsmelder (`0x65`) and Wandtaster 6fach 230V (`0x74`).
 - **Changed:** Universalaktor (`0x43`) has its reset buttons only once (channel 01).
+- **Fixed:** a device that is not reachable is no longer polled every 30 seconds forever after a command; it is asked at most 4 times.
 - **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
 - **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s.
 - **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
