@@ -158,6 +158,9 @@
       },
       "wind_detected": {
         "name": "Wind erkannt"
+      },
+      "rain_detected": {
+        "name": "Regen erkannt"
       }
     },
     "switch": {
@@ -485,6 +488,12 @@
       },
       "temperature_grenzwerte": {
         "name": "Temperatur Grenzwerte"
+      },
+      "device_date": {
+        "name": "Gerätedatum"
+      },
+      "device_time": {
+        "name": "Geräteuhrzeit"
       }
     },
     "text": {
@@ -579,6 +588,9 @@
     },
     "pair_timeout": {
       "message": "Timeout: Gerät {device_code} hat nicht innerhalb von {timeout} s geantwortet. Bitte sicherstellen, dass das Gerät im Anmeldemodus ist."
+    },
+    "write_config_incomplete": {
+      "message": "Konfiguration nicht geschrieben: Es wurden erst {received} von 8 Registerseiten vom Gerät gelesen. Bitte zuerst \"Konfiguration abrufen\" drücken, warten bis alle Werte angezeigt werden, und dann erneut schreiben."
     }
   }
 }

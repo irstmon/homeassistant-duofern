@@ -51,6 +51,40 @@ PAIR_TIMEOUT: Final = 60.0
 REMOTE_PAIR_TIMEOUT: Final = 10.0  # seconds to wait for CC/AA/BB after remotePair
 STATUS_TIMEOUT: Final = 30.0
 STATUS_RETRY_COUNT: Final = 4  # retries after ACK 810003CC (from FHEM)
+
+# Startup status poll, from 30_DUOFERN.pm DUOFERN_Define:
+#   if ($hash->{CODE} =~ m/^(40|41|42|43|46|47|48|49|4A|4B|4C|4E|61|62|65|69|70|71|73|74)....$/) {
+#     $hash->{helper}{timeout}{t} = 30;
+#     InternalTimer(gettimeofday()+30, "DUOFERN_StatusTimeout", $hash, 0);
+#     $hash->{helper}{timeout}{count} = 2;
+# A device of one of these types that has not sent a status frame is asked
+# directly after 30 s and once more after another 30 s.
+STARTUP_STATUS_TIMEOUT: Final = 30.0
+STARTUP_STATUS_RETRY_COUNT: Final = 2
+STARTUP_STATUS_POLL_TYPES: Final[frozenset[int]] = frozenset(
+    {
+        0x40,
+        0x41,
+        0x42,
+        0x43,
+        0x46,
+        0x47,
+        0x48,
+        0x49,
+        0x4A,
+        0x4B,
+        0x4C,
+        0x4E,
+        0x61,
+        0x62,
+        0x65,
+        0x69,
+        0x70,
+        0x71,
+        0x73,
+        0x74,
+    }
+)
 FLUSH_BUFFER_TIMEOUT: Final = 0.5
 
 # ---------------------------------------------------------------------------

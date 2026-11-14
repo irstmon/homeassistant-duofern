@@ -1,2 +1,30 @@
-# Release v2.3.11
+# Release v2.4.0
 
+- **Fixed:** Umweltsensor (`0x69`) weather values and configuration no longer disappear after every status frame of its actor channel.
+- **Fixed:** Wandtaster 6fach 230V (`0x74`): status frames of an unknown format no longer overwrite the relay state with wrong values. Unknown status formats are now ignored for all devices.
+- **Fixed:** Universalaktor (`0x43`) channel 2: automation switches, stairwell time and the dusk/dawn buttons now act on channel 2 instead of channel 1.
+- **Fixed:** switch and dimmer actors are no longer polled several more times after every command.
+- **Fixed:** service `pair_device_by_code` failed after a successful pairing and stopped working after the first reload.
+- **Fixed:** the serial port is closed again if the stick does not answer during startup.
+- **Fixed:** Umweltsensor rain triggers fire only when rain starts or stops, not every minute.
+- **Fixed:** slat run time is now sent and shown in seconds (0.1-5.0 s).
+- **Fixed:** changing the serial port (reconfigure) no longer uses a Home Assistant function that stops working in 2026.12; the integration also reloads only once after pairing or unpairing.
+- **Fixed:** Umweltsensor "Write Config" refuses to write until the configuration has been read from the device, instead of overwriting unread settings with zeros.
+- **Fixed:** a platform that fails to load no longer causes its entities to be deleted from the registry.
+- **Fixed:** motor dead time select shows "short"/"long" instead of "unknown".
+- **Fixed:** Wandtaster actor device no longer offers button triggers that can never fire.
+- **Fixed:** missing names for the rain sensor and the device date/time sensors.
+- **Fixed:** Raumthermostat (`0x73`) "Activate Zone" buttons now send the command in the same form as FHEM.
+- **Fixed:** pair/unpair responses are only accepted while a pairing or unpairing window is open; a device can no longer be removed outside of it.
+- **Fixed:** obstacle / block / light curtain events fire once per occurrence instead of with every status frame.
+- **Fixed:** dimmers no longer switch off when turned on with the lowest brightness.
+- **Fixed:** system and device codes containing spaces are rejected right away; the "Pair by Code" field can be cleared again.
+- **New:** dusk / dawn buttons for dimmers (`0x48`/`0x4A`).
+- **New:** reset buttons for Umweltsensor (`0x69`), Bewegungsmelder (`0x65`) and Wandtaster 6fach 230V (`0x74`).
+- **Changed:** Universalaktor (`0x43`) has its reset buttons only once (channel 01).
+- **Fixed:** Universalaktor (`0x43`) and the actor channels of Bewegungsmelder (`0x65`), Umweltsensor (`0x69`) and Wandtaster 6fach 230V (`0x74`) are now shown as unavailable when they do not acknowledge a command, and their state is requested again after a command.
+- **Fixed:** a device that is not reachable is no longer polled every 30 seconds forever after a command; it is asked at most 4 times.
+- **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
+- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s.
+- **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
+- **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.

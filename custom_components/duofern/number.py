@@ -59,6 +59,9 @@ class DuoFernNumberDescription(NumberEntityDescription):
     # Used for 0x69 Umweltsensor to keep config numbers on "00" and actor
     # numbers on "01".
     channel_filter: str | None = None
+    # Raw device value = UI value * value_scale. 1.0 (default) means the
+    # reading and the command use the same unit as the UI.
+    value_scale: float = 1.0
 
 
 # ALL_COVER_TYPES and TROLL_COVER_TYPES are imported from const.py to avoid
@@ -129,6 +132,9 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         icon="mdi:timer",
         device_types=_BLINDS_TYPES,
         coordinator_method="async_set_slat_run_time",
+        # Device value is 0-50 (30_DUOFERN.pm: slatRunTime min 0, max 50),
+        # shown here as 0.1-5.0 s, so one raw step is 0.1 s.
+        value_scale=10.0,
     ),
     DuoFernNumberDescription(
         key="defaultSlatPos",
@@ -538,7 +544,7 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
             val = state.status.readings.get(self.entity_description.reading_key)
             if val is not None:
                 try:
-                    live = float(val)
+                    live = float(val) / self.entity_description.value_scale
                     self._restored_value = live  # keep in sync for next restart
                     return live
                 except (TypeError, ValueError):
@@ -554,7 +560,9 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
         perform their own rounding/conversion internally.
         """
         method = getattr(self.coordinator, self.entity_description.coordinator_method)
-        await method(self._device_code, float(value))
+        await method(
+            self._device_code, float(value) * self.entity_description.value_scale
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -571,11 +579,10 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
 #     confirmed against a real Homepilot slider endpoint — safe assumption,
 #     @geraldeberle1234 asked to verify
 #   Sonne "Ab Temperatur von": bit-width + consistent with @geraldeberle1234's screenshots
-#   Sonnenrichtung Zielwinkel: safe assumption (continuous Number with the
-#     22.5° step instead of a fixed option list) — @geraldeberle1234 asked whether 0°/
-#     337.5° are valid Homepilot values or not; using Number here means this
-#     doesn't need to be "right" up front, only the min/max needs revisiting
-#     later if it turns out too narrow or too wide
+#   Sonnenrichtung Zielwinkel / Bereich and Sonnenhöhe are not Numbers:
+#     they are Select entities with fixed option lists, see select.py
+#     (DuoFernSunDirectionAngleSelect, DuoFernSunDirectionWidthSelect,
+#     DuoFernSunHeightTargetSelect, DuoFernSunHeightWidthSelect).
 
 
 @dataclass(frozen=True)

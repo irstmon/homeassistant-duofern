@@ -35,6 +35,7 @@ Reference: 10_DUOFERNSTICK.pm and 30_DUOFERN.pm from FHEM.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 from enum import IntEnum
 
@@ -946,6 +947,29 @@ class DuoFernDecoder:
         return f[0] == 0x0F and f[1] == 0xFF and f[2] == 0x0F
 
     @staticmethod
+    def has_known_status_format(data: bytes | bytearray | str) -> bool:
+        """True if parse_status() has a real format definition for this frame.
+
+        From 30_DUOFERN.pm:
+          my $format = substr($msg, 6, 2);
+          if(exists $devices{substr($code,0,2)}{format}) { $format = ... }
+          ...
+          if(exists $statusGroups{$format}) { ...parse... }
+        A frame whose format byte is neither listed in STATUS_GROUPS nor
+        replaced by a per-device-type override carries no readings FHEM knows
+        about. _determine_format() falls back to STATUS_FORMAT_DEFAULT for such
+        a frame; the coordinator uses this check to keep the last known
+        readings instead of overwriting them with that fallback parse.
+        """
+        f = DuoFernDecoder._ensure_bytes(data)
+        if len(f) < 18:
+            return False
+        if f[15] in DEVICE_STATUS_FORMAT_OVERRIDE:
+            return True
+        fmt_str = format(f[3], "02X").lstrip("0") or "0"
+        return fmt_str in STATUS_GROUPS
+
+    @staticmethod
     def is_pair_response(data: bytes | bytearray | str) -> bool:
         """#Device paired — if ($msg =~ m/^0602/) { ... }"""
         f = DuoFernDecoder._ensure_bytes(data)
@@ -1583,13 +1607,9 @@ def validate_system_code(code: str) -> bool:
 
     From 10_DUOFERNSTICK.pm: dongle serial starts with "6F".
     """
-    if len(code) != 6:
-        return False
-    try:
-        bytes.fromhex(code)
-    except ValueError:
-        return False
-    return code.upper().startswith("6F")
+    # 10_DUOFERNSTICK.pm DUOFERNSTICK_Define: $a[3] !~ m/^6F[a-f0-9]{4}$/i
+    # (bytes.fromhex() alone is not enough, it skips whitespace).
+    return re.fullmatch(r"6F[0-9A-F]{4}", code, re.IGNORECASE) is not None
 
 
 def validate_device_code(code: str) -> bool:
@@ -1599,10 +1619,5 @@ def validate_device_code(code: str) -> bool:
     for the pairing handshake is unknown. Use Auto-Discovery for 10-digit
     devices that were paired via Homepilot.
     """
-    if len(code) != 6:
-        return False
-    try:
-        bytes.fromhex(code)
-    except ValueError:
-        return False
-    return True
+    # bytes.fromhex() alone is not enough, it skips whitespace ("40  12").
+    return re.fullmatch(r"[0-9A-Fa-f]{6}", code) is not None

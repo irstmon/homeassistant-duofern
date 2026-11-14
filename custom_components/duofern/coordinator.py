@@ -65,6 +65,9 @@ from .const import (
     DEVICE_CHANNELS,
     DOMAIN,
     REMOTE_PAIR_TIMEOUT,
+    STARTUP_STATUS_POLL_TYPES,
+    STARTUP_STATUS_RETRY_COUNT,
+    STARTUP_STATUS_TIMEOUT,
     STATUS_RETRY_COUNT,
     STATUS_TIMEOUT,
 )
@@ -153,6 +156,11 @@ class DuoFernDeviceState:
     # (e.g. 810100BB — command received but rejected).  Cleared on CC (810003CC).
     boost_retry_pending: str | None = None
 
+    # True while the last duoSetHSA frame was a pure forceResponse reply
+    # (setValue 0, nothing queued). Used to send the stick-unfreeze TX if
+    # the device answers it with BB. Cleared on CC / AA / BB.
+    hsa_force_reply_sent: bool = False
+
     # Set to True after a boost OFF command is accepted (CC).
     # While True, incoming status frames that still show boost active (F0) must
     # NOT overwrite readings["boostActive"] back to "on" — the device takes a
@@ -203,6 +211,12 @@ class DuoFernDeviceState:
     # DUOFERN_DecodeWeatherSensorConfig() after each arrival.
     # Only set for 0x69 channel "00"; always empty for all other devices.
     weather_config_registers: dict[int, str] = field(default_factory=dict)
+
+    # Register indexes (0-7) that were actually received from the device in a
+    # getConfig response. weather_config_registers alone cannot tell this:
+    # the local setters create a missing page from all zeros. writeConfig only
+    # runs once all 8 pages are in this set, see async_write_weather_config().
+    weather_config_pages_read: set[int] = field(default_factory=set)
 
     # --- Umweltsensor 0x69 structured trigger GUI (channel "00" only) ---
     #
@@ -317,6 +331,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Guard flag to prevent multiple parallel reconnect tasks when the stick
         # sends several NOT_INITIALIZED (81010C55) frames in quick succession.
         self._reconnecting: bool = False
+        # Startup status poll (see async_start_startup_status_poll): 6-digit
+        # codes of devices that have not sent a status frame since startup.
+        self._startup_status_pending: set[str] = set()
+        self._startup_status_task: asyncio.Task[None] | None = None
 
         # Optional callback invoked when a new device is paired via the stick's
         # pairing button. Registered by async_setup_entry in __init__.py so the
@@ -406,6 +424,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Cancel all per-device status timeout tasks
         for state in self.data.devices.values():
             self._cancel_status_timeout(state)
+        # Cancel the startup status poll
+        if self._startup_status_task and not self._startup_status_task.done():
+            self._startup_status_task.cancel()
+        self._startup_status_task = None
+        self._startup_status_pending.clear()
         # Disconnect the stick
         if self._stick:
             await self._stick.disconnect()
@@ -545,6 +568,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         hex_code = device_code.hex
 
         self._maybe_trigger_discovery(device_code)
+        # Any status frame ends the startup poll for this device (FHEM:
+        # "delete $hash->{helper}{timeout}" at the top of the status handler).
+        self._startup_status_pending.discard(hex_code)
+        # FHEM only parses a status frame when its format is listed in
+        # %statusGroups (30_DUOFERN.pm: "if(exists $statusGroups{$format})").
+        # For any other format it still updates "version" and removes the
+        # status timer, but leaves all readings untouched.
+        format_known = DuoFernDecoder.has_known_status_format(frame)
         channels = DEVICE_CHANNELS.get(device_code.device_type)
         if channels:
             # Multi-channel device: update each channel with channel-specific parsing
@@ -556,9 +587,23 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     continue
                 any_found = True
                 parsed = DuoFernDecoder.parse_status(frame, channel=ch)
-                state.status = parsed
+                if not format_known or (device_code.device_type == 0x69 and ch == "00"):
+                    # Keep the existing readings and only refresh the firmware
+                    # version (FHEM writes "version" before it looks at the
+                    # format). Two cases end up here:
+                    #  - a status format that is not in STATUS_GROUPS (FHEM
+                    #    skips its whole parsing loop for those), and
+                    #  - the Umweltsensor weather-station channel "00", whose
+                    #    readings come from the weather, time and config
+                    #    frames. The actor status frame only describes
+                    #    channel "01" and must not replace them.
+                    if parsed.version is not None:
+                        state.status.version = parsed.version
+                else:
+                    state.status = parsed
                 state.available = True
                 state.last_seen = dt_util.now().isoformat(timespec="seconds")
+                self._cancel_status_timeout(state)
             if not any_found:
                 _LOGGER.debug(
                     "Status from unknown channel device %s — ignoring", hex_code
@@ -570,7 +615,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             if state is None:
                 _LOGGER.debug("Status from unknown device %s — ignoring", hex_code)
                 return
+            # A status frame arrived: stop the fallback poll loop that was
+            # started after CC/AA (FHEM: RemoveInternalTimer on every status).
+            self._cancel_status_timeout(state)
             parsed = DuoFernDecoder.parse_status(frame)
+
+            if not format_known:
+                # Unknown status format: keep the last known readings, only
+                # refresh version and availability (see format_known above).
+                _LOGGER.debug(
+                    "Status from %s with unknown format 0x%02X - readings kept",
+                    hex_code,
+                    frame[3],
+                )
+                if parsed.version is not None:
+                    state.status.version = parsed.version
+                state.available = True
+                state.last_seen = dt_util.now().isoformat(timespec="seconds")
+                self.async_set_updated_data(self.data)
+                return
 
             # Read boost_active from the PREVIOUS status BEFORE overwriting
             # state.status — otherwise the False→True edge detection below
@@ -582,6 +645,8 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             # show 28°C permanently.  We restore it below after state.status = parsed.
             prev_desired_temp = state.status.desired_temp
             prev_desired_temp_reading = state.status.readings.get("desired-temp")
+            # Previous readings for the obstacle/block edge detection below.
+            prev_readings = state.status.readings
 
             state.status = parsed
             state.available = True
@@ -647,7 +712,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.status.readings["boostDuration"] = state.pending_boost_duration
 
             # Fire obstacle/block events for automation triggers (e.g. SX5 garage)
-            self._fire_obstacle_events(hex_code, parsed)
+            self._fire_obstacle_events(hex_code, parsed, prev_readings)
 
             # 0xE1 Heizkörperantrieb: device-initiated protocol — send any
             # queued HSA changes now that the device has checked in.
@@ -744,8 +809,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         self.async_set_updated_data(self.data)
 
-    def _fire_obstacle_events(self, hex_code: str, parsed: ParsedStatus) -> None:
+    def _fire_obstacle_events(
+        self,
+        hex_code: str,
+        parsed: ParsedStatus,
+        prev_readings: dict[str, Any] | None = None,
+    ) -> None:
         """Fire HA events for block/obstacle readings so automations can trigger.
+
+        An event is fired once when a reading becomes active (previous value
+        not set or inactive), not again for every further status frame that
+        still reports it. It can fire again after the reading was cleared.
 
         SX5 (0x4E) status frame includes: obstacle, block, lightCurtain.
         These are stored in extra_state_attributes on the CoverEntity AND
@@ -760,7 +834,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         """
         for key in ("obstacle", "block", "lightCurtain"):
             val = parsed.readings.get(key)
-            if val:
+            if val and not (prev_readings or {}).get(key):
                 self.hass.bus.async_fire(
                     DUOFERN_EVENT,
                     {
@@ -921,8 +995,21 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if weather.temperature is not None:
             r["temperature"] = weather.temperature
         if weather.is_raining is not None:
-            r["isRaining"] = weather.is_raining
+            # Fire startRain/endRain only when the rain bit actually changes.
+            # The weather frame arrives about once per minute; firing on every
+            # frame made the "rain start"/"rain end" device triggers run every
+            # minute. On the first frame after startup there is no previous
+            # value: startRain is fired if it is raining right now, endRain
+            # is not fired (no rain was seen that could have ended).
+            prev_raining = r.get("isRaining")
             if weather.is_raining:
+                rain_changed = not prev_raining
+            else:
+                rain_changed = bool(prev_raining)
+            r["isRaining"] = weather.is_raining
+            if not rain_changed:
+                pass
+            elif weather.is_raining:
                 self.hass.bus.async_fire(
                     DUOFERN_EVENT,
                     {
@@ -1011,6 +1098,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         # Accumulate register pages (FHEM: readingsSingleUpdate ".reg$reg")
         state.weather_config_registers[reg_index] = reg_data
+        state.weather_config_pages_read.add(reg_index)
         _LOGGER.debug(
             "Umweltsensor config register %d received for %s00 (%d/8 pages so far)",
             reg_index,
@@ -1071,6 +1159,28 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.battery_percent = battery_percent
         self.async_set_updated_data(self.data)
 
+    def _states_for(self, device_code: DuoFernId) -> list[DuoFernDeviceState]:
+        """Return the state(s) that belong to a 6-digit device code.
+
+        ACK frames (810003CC / 810108AA / BB) only carry the 6-digit code.
+        Multi-channel devices (DEVICE_CHANNELS: 0x43, 0x65, 0x69, 0x74) are
+        stored per channel under code + channel, so a plain lookup by
+        device_code.hex finds nothing for them. Returns one state for a
+        single-channel device, all channel states for a multi-channel device
+        (in DEVICE_CHANNELS order), or an empty list for an unknown device.
+        """
+        state = self.data.devices.get(device_code.hex)
+        if state is not None:
+            return [state]
+        channels = DEVICE_CHANNELS.get(device_code.device_type)
+        if not channels:
+            return []
+        return [
+            ch_state
+            for ch in channels
+            if (ch_state := self.data.devices.get(device_code.hex + ch)) is not None
+        ]
+
     def _handle_cmd_ack(self, frame: bytearray) -> None:
         """Handle ACK frame: command received by actor (810003CC).
 
@@ -1101,12 +1211,20 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.boost_off_cooldown = True
                 state.boost_ha_on_pending_f0 = False
             state.boost_retry_pending = None
+            state.hsa_force_reply_sent = False
         if device_code.device_type == 0xE1:
             return
         # Cover devices send their own status frame when movement ends —
         # no polling needed. Polling immediately after CC returns the current
         # (pre-movement) position, which would wipe the optimistic moving state.
         if device_code.is_cover:
+            return
+        # Same for the cover channel of a multi-channel device (Umweltsensor
+        # 0x69 channel 01); the 6-digit code alone is not recognised as a cover.
+        if any(
+            s.channel is not None and device_code.with_channel(s.channel).is_cover
+            for s in self._states_for(device_code)
+        ):
             return
         # FHEM: InternalTimer(+60s, DUOFERN_StatusTimeout, count=4)
         # Start a fallback timer: poll once every STATUS_TIMEOUT seconds,
@@ -1130,13 +1248,26 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             pair_hex, pair_future = self._pending_pair_future
             if device_code.hex == pair_hex and not pair_future.done():
                 pair_future.set_result("AA")
-        state = self.data.devices.get(device_code.hex)
-        if state:
+        # FHEM sets "MISSING ACK" on the device and on all of its channels.
+        # The "00" sub-channel of 0x65/0x69/0x74 is left out here: it only
+        # receives (button/motion events, weather data) and is not the target
+        # of the command that was not acknowledged.
+        for state in self._states_for(device_code):
+            if state.channel == "00":
+                continue
             state.available = False
+            state.hsa_force_reply_sent = False
         self.async_set_updated_data(self.data)
         if device_code.device_type == 0xE1:
             return
-        self._start_status_timeout(device_code)
+        if device_code.hex in self._startup_status_pending:
+            # MISSING ACK for a startup status poll: the device is marked
+            # unavailable above, but no further poll loop is started. The
+            # startup poll has its own, limited retry count; a device that
+            # is switched off would otherwise be polled every STATUS_TIMEOUT
+            # seconds without end.
+            return
+        self._start_status_timeout(device_code, restart=False)
 
     def _handle_not_initialized(self) -> None:
         """Handle NACK 'actor not initialized' frame (81010C55).
@@ -1243,10 +1374,18 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 return
             self._schedule_hsa_update(device_code, "boostActive", retry_val)
         if device_code.device_type == 0xE1:
+            if state and state.hsa_force_reply_sent:
+                # BB on a reply that was only sent because the device set
+                # forceResponse. After BB the stick stops forwarding RX until
+                # the next TX (see _send_stick_unfreeze).
+                state.hsa_force_reply_sent = False
+                self.hass.async_create_task(self._send_stick_unfreeze(device_code))
             return
-        self._start_status_timeout(device_code)
+        self._start_status_timeout(device_code, restart=False)
 
-    def _start_status_timeout(self, device_code: DuoFernId) -> None:
+    def _start_status_timeout(
+        self, device_code: DuoFernId, restart: bool = True
+    ) -> None:
         """Start the FHEM-style fallback status-poll timer after CC/AA/BB.
 
         From 30_DUOFERN.pm (ACK handler, non-E1):
@@ -1257,14 +1396,83 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Polls the device once every STATUS_TIMEOUT seconds, up to
         STATUS_RETRY_COUNT times, stopping early when a status frame
         arrives (_cancel_status_timeout is called from _handle_status).
+
+        restart=False is used for negative responses (missing ACK 810108AA,
+        BB/DD): a loop that is already running is left alone. Its own status
+        requests are answered with such a response when the device is not
+        reachable; restarting the loop each time would poll the device every
+        STATUS_TIMEOUT seconds without end. This way an unreachable device is
+        asked at most STATUS_RETRY_COUNT times per loop.
         """
-        state = self.data.devices.get(device_code.hex)
-        if state is None:
+        # For a multi-channel device the task is kept on its first channel
+        # state; _handle_status cancels the task of every channel state.
+        states = self._states_for(device_code)
+        if not states:
+            return
+        state = states[0]
+        if (
+            not restart
+            and state.status_timeout_task is not None
+            and not state.status_timeout_task.done()
+        ):
             return
         self._cancel_status_timeout(state)
         state.status_timeout_task = self.hass.async_create_task(
             self._status_timeout_loop(device_code)
         )
+
+    def async_start_startup_status_poll(self) -> None:
+        """Start the one-time status poll for devices that stay silent.
+
+        From 30_DUOFERN.pm DUOFERN_Define / DUOFERN_StatusTimeout: every
+        actor gets a 30 s timer with count 2 when it is defined. The timer is
+        removed by the first status frame from the device. If it expires,
+        one status request is sent to that device and the timer is started
+        again, until the count is used up.
+
+        The stick init sequence ends with a status broadcast, so most devices
+        report within the first seconds and are never asked again.
+        """
+        self._startup_status_pending = {
+            state.device_code.hex
+            for state in self.data.devices.values()
+            if state.device_code.device_type in STARTUP_STATUS_POLL_TYPES
+        }
+        if self._startup_status_task and not self._startup_status_task.done():
+            self._startup_status_task.cancel()
+        self._startup_status_task = self.hass.async_create_task(
+            self._startup_status_poll()
+        )
+
+    async def _startup_status_poll(self) -> None:
+        """Ask every device without a status frame, at most twice."""
+        try:
+            for attempt in range(1, STARTUP_STATUS_RETRY_COUNT + 1):
+                await asyncio.sleep(STARTUP_STATUS_TIMEOUT)
+                missing = sorted(self._startup_status_pending)
+                if not missing:
+                    return
+                _LOGGER.debug(
+                    "Startup status poll %d/%d for %s",
+                    attempt,
+                    STARTUP_STATUS_RETRY_COUNT,
+                    missing,
+                )
+                for hex_code in missing:
+                    if hex_code in self._startup_status_pending:
+                        await self._send_status_request(DuoFernId.from_hex(hex_code))
+            # Leave time for the replies to the last request before the
+            # pending set is cleared (it suppresses the AA poll loop).
+            await asyncio.sleep(STARTUP_STATUS_TIMEOUT)
+            if self._startup_status_pending:
+                _LOGGER.info(
+                    "No status received after startup from: %s",
+                    sorted(self._startup_status_pending),
+                )
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._startup_status_pending.clear()
 
     def _cancel_status_timeout(self, state: "DuoFernDeviceState") -> None:
         """Cancel any running status-timeout loop for this device.
@@ -1293,6 +1501,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
                 await self._send_status_request(device_code)
+            # Stay alive until the response to the last request has arrived,
+            # so that a missing ACK for it does not start a new loop
+            # (see _start_status_timeout, restart=False).
+            await asyncio.sleep(STATUS_TIMEOUT)
         except asyncio.CancelledError:
             _LOGGER.debug(
                 "Status timeout cancelled for %s (status frame received)",
@@ -1320,6 +1532,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     def _handle_pair_response(self, frame: bytearray) -> None:
         """#Device paired (0602...)."""
         device_code = DuoFernDecoder.extract_device_code(frame)
+        # From 10_DUOFERNSTICK.pm:
+        #   if($rmsg =~ m/0602.{40}/) { Dispatch(...) if ($hash->{pair}); ...
+        # A pair response is only processed while a pairing window (stick
+        # button) or a pair-by-code run is active.
+        if not self.data.pairing_active and self._pending_pair_future is None:
+            _LOGGER.debug(
+                "Pair response (0602) from %s outside a pairing window - ignored",
+                device_code.hex,
+            )
+            return
         _LOGGER.info("Device paired: %s", device_code.hex)
 
         # Resolve pair-by-code future — 0602 is the definitive success signal.
@@ -1358,6 +1580,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Sequence: StopUnpair → remove from config → reload.
         """
         device_code = DuoFernDecoder.extract_device_code(frame)
+        # From 10_DUOFERNSTICK.pm:
+        #   } elsif ($rmsg =~ m/0603.{40}/) { Dispatch(...) if ($hash->{unpair});
+        # An unpair response is only processed while an unpairing window is
+        # active. Without this check a stray 0603 removed the device from the
+        # config entry and reloaded the integration.
+        if not self.data.unpairing_active:
+            _LOGGER.debug(
+                "Unpair response (0603) from %s outside an unpairing window - ignored",
+                device_code.hex,
+            )
+            return
         _LOGGER.info("Device unpaired: %s", device_code.hex)
         state = self.data.devices.get(device_code.hex)
         if state:
@@ -1405,12 +1638,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 len(current),
                 len(updated),
             )
+            # The config entry update listener (__init__.py) reloads the
+            # integration on this data change - no explicit second reload.
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
                 data={**self.config_entry.data, CONF_PAIRED_DEVICES: updated},
-            )
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.config_entry.entry_id)
             )
 
     # ------------------------------------------------------------------
@@ -1646,12 +1878,11 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             )
             if device_code_hex not in {c[:6] for c in current}:
                 current.append(device_code_hex)
+                # The config entry update listener (__init__.py) reloads the
+                # integration on this data change - no explicit second reload.
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
                     data={**self.config_entry.data, CONF_PAIRED_DEVICES: current},
-                )
-                self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 )
             return
 
@@ -1765,9 +1996,35 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_cover_command(
-            command, device_code, self._system_code, position=position
+            command,
+            device_code,
+            self._system_code,
+            channel=self._frame_channel(device_code),
+            position=position,
         )
         await self._stick.send_command(frame)
+
+    @staticmethod
+    def _frame_channel(device_code: DuoFernId, channel: int = 1) -> int:
+        """Return the channel byte (cc) for a command frame.
+
+        From 30_DUOFERN.pm DUOFERN_Set:
+          my $chanNo = "01";
+          $chanNo = $hash->{chanNo} if ($hash->{chanNo});
+          $buf =~ s/cc/$chanNo/;
+        A channel-carrying device code (e.g. Universalaktor 0x43 channel "02")
+        addresses its own channel. Channel-less codes and the "00" sub-channel
+        of 0x65/0x69/0x74 are sent with channel 01, exactly as before this
+        helper existed. An explicitly passed channel other than 1 always wins.
+        """
+        if channel != 1:
+            return channel
+        if device_code.channel in (None, "", "00"):
+            return channel
+        try:
+            return int(device_code.channel, 16)
+        except ValueError:
+            return channel
 
     def _set_moving(self, device_code: DuoFernId, moving: str) -> None:
         """Optimistically set moving state before status arrives.
@@ -1874,7 +2131,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         if self._stick is None:
             return
         frame = DuoFernEncoder.build_generic_command(
-            payload, device_code, self._system_code, channel=channel
+            payload,
+            device_code,
+            self._system_code,
+            channel=self._frame_channel(device_code, channel),
         )
         await self._stick.send_command(frame)
 
@@ -2121,12 +2381,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
           actTempLimit => {1 => "081Ett00001000000000", 2 => "...3000...",
                            3 => "...5000...", 4 => "...7000..."}
         """
-        tt = device_code.raw[0]
+        # "tt" is the timer flag, not the device type. DUOFERN_Set:
+        #   my $timer = "00"; ... $timer = "01" if "timer" argument given
+        #   $buf =~ s/tt/$timer/;
+        # No timer variant is offered here, so tt is always 00.
         mapping = {
-            1: f"081E{tt:02x}00001000000000",
-            2: f"081E{tt:02x}00003000000000",
-            3: f"081E{tt:02x}00005000000000",
-            4: f"081E{tt:02x}00007000000000",
+            1: "081E0000001000000000",
+            2: "081E0000003000000000",
+            3: "081E0000005000000000",
+            4: "081E0000007000000000",
         }
         h = mapping.get(int(value), mapping[1])
         await self._send_generic(device_code, bytes.fromhex(h))
@@ -2181,20 +2444,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         From 30_DUOFERN.pm: tempUp => {noArg => "0718tt00000000000000"}
         """
-        tt = device_code.raw[0]
-        await self._send_generic(
-            device_code, bytes.fromhex(f"0718{tt:02x}00000000000000")
-        )
+        # tt = timer flag (00 = no timer), see async_set_act_temp_limit().
+        await self._send_generic(device_code, bytes.fromhex("07180000000000000000"))
 
     async def async_temp_down(self, device_code: DuoFernId) -> None:
         """Decrement thermostat temperature.
 
         From 30_DUOFERN.pm: tempDown => {noArg => "0719tt00000000000000"}
         """
-        tt = device_code.raw[0]
-        await self._send_generic(
-            device_code, bytes.fromhex(f"0719{tt:02x}00000000000000")
-        )
+        # tt = timer flag (00 = no timer), see async_set_act_temp_limit().
+        await self._send_generic(device_code, bytes.fromhex("07190000000000000000"))
 
     async def async_reset(
         self, device_code: DuoFernId, reset_type: str = "settings"
@@ -2351,7 +2610,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         overwritten with our optimistic pending values.
         """
         state = self.data.devices.get(device_code.hex)
-        if state is None or not state.hsa_pending:
+        if state is None:
+            return
+        # From 30_DUOFERN.pm: if(($setValue + $statusValue{forceResponse}) > 0)
+        # The device can ask for a reply with the forceResponse bit of its
+        # status frame. It then gets a duoSetHSA frame even when nothing is
+        # queued (setValue 0). Without that bit and without queued changes
+        # nothing is sent.
+        force_response = int(device_readings.get("forceResponse") or 0)
+        if not state.hsa_pending and force_response <= 0:
             return
         if self._stick is None:
             return
@@ -2525,13 +2792,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     device_code.hex,
                 )
 
-        # Send HSA frame only if something is pending (mirrors HomePilot behavior).
-        # sv=0 on a plain D3 with nothing pending → BB. Boost frame takes priority,
-        # no second frame is sent after it.
+        # Send HSA frame only if something is pending or the device asked for a
+        # reply (forceResponse, see top of this method). sv=0 on a plain D3
+        # with nothing pending and no forceResponse → BB. Boost frame takes
+        # priority, no second frame is sent after it.
         sent_boost = boost_active_val is not None or boost_duration_val is not None
-        force_response = state.status.readings.get("forceResponse", 0)
-        if not sent_boost and (set_value > 0 or int(force_response or 0) > 0):
+        if not sent_boost and (set_value > 0 or force_response > 0):
             frame = DuoFernEncoder.build_hsa_command(set_value, device_code)
+            # Remember a pure forceResponse reply (nothing queued): if the
+            # device rejects it with BB, _handle_unknown_ack has to send the
+            # stick-unfreeze TX, as it does after a rejected boost frame.
+            state.hsa_force_reply_sent = set_value == 0
             await self._stick.send_command(frame)
             _LOGGER.info(
                 "Sent duoSetHSA to %s: setValue=0x%06X (keys: %s)",
@@ -2704,7 +2975,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
 
         Reads register pages from state.weather_config_registers (populated by
         _handle_weather_config() on getConfig response and updated locally by
-        async_set_umweltsensor_* methods). Missing pages default to all zeros.
+        async_set_umweltsensor_* methods). Raises HomeAssistantError
+        (write_config_incomplete) unless all 8 pages have been received from
+        the device via getConfig.
 
         Config always lives on channel "00" (weather station sub-device).
         """
@@ -2717,6 +2990,25 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 "writeConfig: channel 00 state not found for %s", device_code.hex
             )
             return
+        # Refuse to write unless all 8 register pages were read from the
+        # device before. A page that was never received would be sent as all
+        # zeros (or as zeros plus one locally changed field) and would wipe
+        # that part of the configuration stored on the device.
+        missing = sorted(set(range(8)) - state.weather_config_pages_read)
+        if missing:
+            _LOGGER.warning(
+                "writeConfig for %s refused: register pages %s were never read "
+                "from the device - run getConfig first",
+                device_code.hex,
+                missing,
+            )
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="write_config_incomplete",
+                translation_placeholders={
+                    "received": str(8 - len(missing)),
+                },
+            )
         # Device code at bytes 18-20 (same layout as all other TX frames).
         # raw is 3 bytes; raw[3:6] always returns empty bytes — use raw.hex().
         dev_hex = device_code.raw.hex()

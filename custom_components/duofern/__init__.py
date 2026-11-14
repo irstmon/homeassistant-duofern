@@ -47,11 +47,10 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_call_later
 
 from .const import CONF_DEVICE_CODE, CONF_PAIRED_DEVICES, CONF_SERIAL_PORT, DOMAIN
 from .coordinator import DuoFernCoordinator
@@ -139,6 +138,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     try:
         await coordinator.async_connect()
     except Exception as err:
+        # The serial port may already be open when the init handshake fails.
+        # Close it again, otherwise every setup retry of this config entry
+        # leaves one more open connection to the port behind.
+        try:
+            await coordinator.async_disconnect()
+        except Exception:  # noqa: BLE001 - never mask the original error
+            _LOGGER.debug("Cleanup after failed connect raised", exc_info=True)
         raise ConfigEntryNotReady(f"Cannot connect to DuoFern stick: {err}") from err
 
     # Store the coordinator as runtime data on the config entry
@@ -149,19 +155,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
 
         async def _handle_pair_by_code(call: ServiceCall) -> dict:
             """Handle the pair_device_by_code service call."""
-            result = await coordinator.async_pair_device_by_code(
-                call.data["device_code"]
-            )
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": result.get("title", "DuoFern: Pair by Code"),
-                    "message": result["message"],
-                    "notification_id": f"duofern_pair_{result['device_code']}",
-                },
-            )
-            return result
+            # Look the coordinator up at call time. The service is registered
+            # only once per HA instance, so a coordinator captured from this
+            # setup run would be the old, disconnected one after the config
+            # entry has been reloaded (e.g. right after a device was paired).
+            loaded = hass.config_entries.async_loaded_entries(DOMAIN)
+            if not loaded:
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN,
+                    translation_key="pair_no_input",
+                )
+            device_code = str(call.data["device_code"]).upper().strip()
+            # Raises HomeAssistantError (pair_aa / pair_bb / pair_timeout /
+            # pair_no_input) on failure and returns None on success.
+            await loaded[0].runtime_data.async_pair_device_by_code(device_code)
+            return {"device_code": device_code, "result": "paired"}
 
         hass.services.async_register(
             DOMAIN,
@@ -194,11 +202,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
             device_code.hex,
             len(current),
         )
+        # The update listener registered below (_async_update_listener)
+        # reloads the entry on this data change, so HA creates the entities
+        # for the new device. No second, explicit reload here.
         hass.config_entries.async_update_entry(
             entry, data={**entry.data, CONF_PAIRED_DEVICES: current}
         )
-        # Reload so HA creates entities for the new device
-        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
 
     coordinator.register_on_new_device_paired(_on_new_device_paired)
 
@@ -229,13 +238,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # Clean up any devices/entities that were removed from the config
     await _async_cleanup_stale_devices(hass, entry)
 
-    # Second status broadcast after 15s to catch devices that missed the first one.
-    # Some devices don't respond to the initial broadcast during startup.
-    async def _delayed_status_broadcast(_now: object = None) -> None:
-        _LOGGER.debug("Sending delayed startup status broadcast")
-        await coordinator.async_request_all_status()
-
-    entry.async_on_unload(async_call_later(hass, 15, _delayed_status_broadcast))
+    # Devices that did not answer the status broadcast of the stick init are
+    # asked directly after 30 s and once more after 60 s (FHEM behaviour, see
+    # DuoFernCoordinator.async_start_startup_status_poll). The task is
+    # cancelled in coordinator.async_disconnect().
+    coordinator.async_start_startup_status_poll()
 
     return True
 
@@ -362,11 +369,39 @@ async def _async_cleanup_stale_devices(
     # current_tuple_ids AND whose bare unique_id is NOT in current_bare_ids
     # (legacy fallback, see note above) was created by an older version of
     # the integration and should be removed.
+    #
+    # Per-platform safety guard: a platform whose async_setup_entry raised
+    # contributes nothing to registered_unique_ids, while the other platforms
+    # do - so the "nothing registered at all" guard above does not catch it.
+    # Without this check every entity of that one platform would be deleted
+    # from the registry (losing renames, areas and disabled flags) just
+    # because of a load error. Entities of a domain that registered nothing
+    # this run are therefore left alone.
+    # The guard needs to know the domain of every registered id, so it is
+    # only active while all ids are (domain, unique_id) tuples. With legacy
+    # bare-string ids in the set the previous behaviour applies unchanged.
+    domains_registered: set[str] = {domain for domain, _uid in current_tuple_ids}
+    domain_guard_active = not current_bare_ids
+    skipped_domains: set[str] = set()
     for reg_entry in er.async_entries_for_config_entry(entity_reg, entry.entry_id):
         is_current = (
             reg_entry.domain,
             reg_entry.unique_id,
         ) in current_tuple_ids or reg_entry.unique_id in current_bare_ids
+        if (
+            not is_current
+            and domain_guard_active
+            and reg_entry.domain not in domains_registered
+        ):
+            if reg_entry.domain not in skipped_domains:
+                skipped_domains.add(reg_entry.domain)
+                _LOGGER.warning(
+                    "DuoFern: platform '%s' registered no entities during this "
+                    "setup run - keeping its existing registry entries. If "
+                    "this platform failed to load, check the log for the error.",
+                    reg_entry.domain,
+                )
+            continue
         if not is_current:
             entity_reg.async_remove(reg_entry.entity_id)
             _LOGGER.warning(

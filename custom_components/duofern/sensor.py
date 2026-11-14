@@ -900,7 +900,7 @@ class DuoFernBoostStartSensor(
 
 
 class DuoFernActiveGrenzwerteSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
+    CoordinatorEntity[DuoFernCoordinator], SensorEntity
 ):
     """Reports which of the up to 5 configured Grenzwerte (trigger slots)
     are currently active for one trigger type (Sonne / Wind / Temperatur).
@@ -921,6 +921,14 @@ class DuoFernActiveGrenzwerteSensor(
     the bits present to the active set, an endX event removes them. native_value
     is the sorted, comma-joined list of active slot numbers (e.g. "1,3"), or
     "" when none are active.
+
+    Deliberately NOT a RestoreEntity: the active set is built purely from
+    start/end events. Events that happen while HA is down or the integration
+    is reloading are lost, so a restored list could claim a Grenzwert is
+    still active long after it ended (or miss one that started). The state
+    is therefore "unknown" (native_value None) after every load until the
+    first real start/end event of this trigger type has been processed
+    (see _has_data); from then on the list is maintained from live events.
 
     Deliberately reports a slot LIST instead of 5 separate boolean entities
     per trigger type (15 total across Sun/Wind/Temp) to avoid entity
@@ -975,18 +983,13 @@ class DuoFernActiveGrenzwerteSensor(
         self._attr_icon = icon
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
         self._active_slots: set[int] = set()
+        # False until the first start/end event with a valid bitmask has been
+        # processed since this entity was loaded (see class docstring).
+        self._has_data: bool = False
 
     async def async_added_to_hass(self) -> None:
-        """Restore last known active slots and subscribe to events."""
+        """Subscribe to events (the state is deliberately not restored)."""
         await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in ("unknown", "unavailable", ""):
-            try:
-                self._active_slots = {
-                    int(s) for s in last_state.state.split(",") if s.strip()
-                }
-            except ValueError:
-                self._active_slots = set()
         self.async_on_remove(
             self.hass.bus.async_listen(DUOFERN_EVENT, self._handle_duofern_event)
         )
@@ -1002,8 +1005,15 @@ class DuoFernActiveGrenzwerteSensor(
         return self._device_state is not None
 
     @property
-    def native_value(self) -> str:
-        """Sorted, comma-joined list of currently active Grenzwert numbers."""
+    def native_value(self) -> str | None:
+        """Sorted, comma-joined list of currently active Grenzwert numbers.
+
+        Returns None ("unknown" in the UI) until the first real event has
+        been processed since this entity was loaded - see _has_data and the
+        class docstring for why this is deliberately not restored or assumed.
+        """
+        if not self._has_data:
+            return None
         return ",".join(str(n) for n in sorted(self._active_slots))
 
     @callback
@@ -1043,6 +1053,7 @@ class DuoFernActiveGrenzwerteSensor(
             self._active_slots |= bits
         else:
             self._active_slots -= bits
+        self._has_data = True
         self.async_write_ha_state()
 
     @callback

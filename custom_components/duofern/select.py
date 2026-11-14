@@ -54,6 +54,10 @@ class DuoFernSelectDescription(SelectEntityDescription):
     # Used for 0x69 Umweltsensor to keep config selects on "00" and actor
     # selects on "01".
     channel_filter: str | None = None
+    # (reading value, option) pairs for readings whose decoded text differs
+    # from the option name used in the UI and in the set command. Readings
+    # not listed here are used as they are.
+    reading_to_option: tuple[tuple[str, str], ...] = ()
 
 
 # All select entities keyed by (description.key)
@@ -69,6 +73,11 @@ SELECT_DESCRIPTIONS: tuple[DuoFernSelectDescription, ...] = (
         icon="mdi:timer-pause",
         device_types=frozenset({0x42, 0x47, 0x4B, 0x4C, 0x70}),
         coordinator_method="async_set_motor_dead_time",
+        # The status reading uses FHEM's %statusMapping "motor" texts
+        # ("off", "short(160ms)", "long(480ms)", "individual"), the set
+        # command uses off/short/long. Without this mapping the entity showed
+        # "unknown" whenever the device reported short or long.
+        reading_to_option=(("short(160ms)", "short"), ("long(480ms)", "long")),
     ),
     DuoFernSelectDescription(
         key="windDirection",
@@ -311,6 +320,7 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, Restore
             val = state.status.readings.get(self.entity_description.reading_key)
             if val is not None:
                 live = str(val)
+                live = dict(self.entity_description.reading_to_option).get(live, live)
                 self._restored_option = live  # keep in sync for next restart
                 return live
         return self._restored_option

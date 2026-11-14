@@ -67,10 +67,8 @@ _EVENT_TO_STATE: dict[str, bool] = {
     "endSmoke": False,
     # NOTE: startRain/endRain are intentionally NOT included here.
     # Rain events come from the Umweltsensor (0x69) which is NOT a
-    # DuoFernBinarySensor device type (0x65/0xAB/0xAC). If a dedicated
-    # rain binary sensor for the Umweltsensor is added in the future,
-    # startRain/endRain should be handled in that class, not here.
-    # TODO: Add DuoFernRainSensor for 0x69 when Umweltsensor support is complete.
+    # DuoFernBinarySensor device type (0x65/0xAB/0xAC). They are handled
+    # by DuoFernRainBinarySensor further down in this file.
     "startSun": True,
     "endSun": False,
     "startWind": True,
