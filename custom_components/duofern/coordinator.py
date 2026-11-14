@@ -1159,6 +1159,28 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 state.battery_percent = battery_percent
         self.async_set_updated_data(self.data)
 
+    def _states_for(self, device_code: DuoFernId) -> list[DuoFernDeviceState]:
+        """Return the state(s) that belong to a 6-digit device code.
+
+        ACK frames (810003CC / 810108AA / BB) only carry the 6-digit code.
+        Multi-channel devices (DEVICE_CHANNELS: 0x43, 0x65, 0x69, 0x74) are
+        stored per channel under code + channel, so a plain lookup by
+        device_code.hex finds nothing for them. Returns one state for a
+        single-channel device, all channel states for a multi-channel device
+        (in DEVICE_CHANNELS order), or an empty list for an unknown device.
+        """
+        state = self.data.devices.get(device_code.hex)
+        if state is not None:
+            return [state]
+        channels = DEVICE_CHANNELS.get(device_code.device_type)
+        if not channels:
+            return []
+        return [
+            ch_state
+            for ch in channels
+            if (ch_state := self.data.devices.get(device_code.hex + ch)) is not None
+        ]
+
     def _handle_cmd_ack(self, frame: bytearray) -> None:
         """Handle ACK frame: command received by actor (810003CC).
 
@@ -1197,6 +1219,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # (pre-movement) position, which would wipe the optimistic moving state.
         if device_code.is_cover:
             return
+        # Same for the cover channel of a multi-channel device (Umweltsensor
+        # 0x69 channel 01); the 6-digit code alone is not recognised as a cover.
+        if any(
+            s.channel is not None and device_code.with_channel(s.channel).is_cover
+            for s in self._states_for(device_code)
+        ):
+            return
         # FHEM: InternalTimer(+60s, DUOFERN_StatusTimeout, count=4)
         # Start a fallback timer: poll once every STATUS_TIMEOUT seconds,
         # up to STATUS_RETRY_COUNT times, unless a status frame arrives first.
@@ -1219,8 +1248,13 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             pair_hex, pair_future = self._pending_pair_future
             if device_code.hex == pair_hex and not pair_future.done():
                 pair_future.set_result("AA")
-        state = self.data.devices.get(device_code.hex)
-        if state:
+        # FHEM sets "MISSING ACK" on the device and on all of its channels.
+        # The "00" sub-channel of 0x65/0x69/0x74 is left out here: it only
+        # receives (button/motion events, weather data) and is not the target
+        # of the command that was not acknowledged.
+        for state in self._states_for(device_code):
+            if state.channel == "00":
+                continue
             state.available = False
             state.hsa_force_reply_sent = False
         self.async_set_updated_data(self.data)
@@ -1370,9 +1404,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         STATUS_TIMEOUT seconds without end. This way an unreachable device is
         asked at most STATUS_RETRY_COUNT times per loop.
         """
-        state = self.data.devices.get(device_code.hex)
-        if state is None:
+        # For a multi-channel device the task is kept on its first channel
+        # state; _handle_status cancels the task of every channel state.
+        states = self._states_for(device_code)
+        if not states:
             return
+        state = states[0]
         if (
             not restart
             and state.status_timeout_task is not None
