@@ -575,6 +575,9 @@
     }
   },
   "exceptions": {
+    "not_loaded": {
+      "message": "The DuoFern integration is not loaded. Check the integration under Settings > Devices & Services."
+    },
     "pair_no_input": {
       "message": "Please enter a valid 6-digit hex device code in the \"Device Code Input\" field first (e.g. 40AB12)."
     },

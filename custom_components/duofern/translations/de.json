@@ -575,6 +575,9 @@
     }
   },
   "exceptions": {
+    "not_loaded": {
+      "message": "Die DuoFern-Integration ist nicht geladen. Prüfe die Integration unter Einstellungen > Geräte & Dienste."
+    },
     "pair_no_input": {
       "message": "Bitte zuerst einen gültigen 6-stelligen Hex-Gerätecode im Feld \"Gerätecode-Eingabe\" eingeben (z. B. 40AB12)."
     },

@@ -47,7 +47,8 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -104,6 +105,45 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
+# The integration is set up through the UI only.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the actions of the integration.
+
+    Actions are registered here and not in async_setup_entry, so they exist
+    whenever the integration is loaded, independent of the state of the
+    config entry. A call without a loaded entry gets a clear error instead
+    of "action not found".
+    """
+
+    async def _handle_pair_by_code(call: ServiceCall) -> dict:
+        """Handle the pair_device_by_code action."""
+        # Look the coordinator up at call time: after a reload of the config
+        # entry (e.g. right after a device was paired) there is a new one.
+        loaded = hass.config_entries.async_loaded_entries(DOMAIN)
+        if not loaded:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_loaded",
+            )
+        device_code = str(call.data["device_code"]).upper().strip()
+        # Raises HomeAssistantError (pair_aa / pair_bb / pair_timeout /
+        # pair_no_input) on failure and returns None on success.
+        await loaded[0].runtime_data.async_pair_device_by_code(device_code)
+        return {"device_code": device_code, "result": "paired"}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PAIR_BY_CODE,
+        _handle_pair_by_code,
+        schema=PAIR_BY_CODE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> bool:
     """Set up DuoFern from a config entry.
 
@@ -154,35 +194,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
 
     # Store the coordinator as runtime data on the config entry
     entry.runtime_data = coordinator
-
-    # Register the pair-by-code service (once per HA instance, not per entry).
-    if not hass.services.has_service(DOMAIN, SERVICE_PAIR_BY_CODE):
-
-        async def _handle_pair_by_code(call: ServiceCall) -> dict:
-            """Handle the pair_device_by_code service call."""
-            # Look the coordinator up at call time. The service is registered
-            # only once per HA instance, so a coordinator captured from this
-            # setup run would be the old, disconnected one after the config
-            # entry has been reloaded (e.g. right after a device was paired).
-            loaded = hass.config_entries.async_loaded_entries(DOMAIN)
-            if not loaded:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN,
-                    translation_key="pair_no_input",
-                )
-            device_code = str(call.data["device_code"]).upper().strip()
-            # Raises HomeAssistantError (pair_aa / pair_bb / pair_timeout /
-            # pair_no_input) on failure and returns None on success.
-            await loaded[0].runtime_data.async_pair_device_by_code(device_code)
-            return {"device_code": device_code, "result": "paired"}
-
-        hass.services.async_register(
-            DOMAIN,
-            SERVICE_PAIR_BY_CODE,
-            _handle_pair_by_code,
-            schema=PAIR_BY_CODE_SCHEMA,
-            supports_response=SupportsResponse.OPTIONAL,
-        )
 
     # Register callback so the coordinator can notify us when a brand-new
     # device is paired via the stick's pairing button.  We then persist its

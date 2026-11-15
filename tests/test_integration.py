@@ -13,9 +13,10 @@ import time
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant.common import MockConfigEntry
 from unittest.mock import patch
 
@@ -350,20 +351,37 @@ async def test_reload_pair_service_reconfigure_unload(hass: HomeAssistant) -> No
         assert FakeStick.instances[-1].closed
 
 
-async def test_pair_service_without_loaded_entry(hass: HomeAssistant) -> None:
-    """The action stays registered after an unload and then raises."""
+async def test_pair_action_without_loaded_entry(hass: HomeAssistant) -> None:
+    """The action exists whenever the integration is loaded and validates its target.
+
+    It is registered in async_setup, so it is there without any config entry
+    and after an unload; a call then raises a translated validation error.
+    """
+    assert await async_setup_component(hass, DOMAIN, {})
+    assert hass.services.has_service(DOMAIN, "pair_device_by_code")
+
+    async def call() -> None:
+        await hass.services.async_call(
+            DOMAIN,
+            "pair_device_by_code",
+            {"device_code": "40AB12"},
+            blocking=True,
+            return_response=True,
+        )
+
+    with pytest.raises(ServiceValidationError) as error:
+        await call()
+    assert error.value.translation_key == "not_loaded"
+
     async with fake_stick():
         entry = make_entry(hass, ["40A1B2"])
         await setup_entry(hass, entry)
         await unload_entry(hass, entry)
-        with pytest.raises(HomeAssistantError):
-            await hass.services.async_call(
-                DOMAIN,
-                "pair_device_by_code",
-                {"device_code": "40AB12"},
-                blocking=True,
-                return_response=True,
-            )
+        assert hass.services.has_service(DOMAIN, "pair_device_by_code")
+        with pytest.raises(ServiceValidationError) as error:
+            await call()
+        assert error.value.translation_key == "not_loaded"
+        assert FakeStick.instances[-1].sent == []
 
 
 async def test_write_config_needs_all_register_pages(hass: HomeAssistant) -> None:
