@@ -60,6 +60,7 @@
           "auto_discover": "Unbekannte Geräte automatisch entdecken"
         },
         "data_description": {
+          "paired_devices": "Kommagetrennte Liste von 6-stelligen Hex-Gerätecodes (z. B. 406B0D, 4090EA, 40B689). Dies sind die Codes Ihrer DuoFern-Geräte.",
           "auto_discover": "Wenn aktiviert, erscheinen DuoFern-Geräte die Frames senden aber noch nicht in der Geräteliste sind im HA-Eingang."
         }
       }

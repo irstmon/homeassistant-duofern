@@ -60,6 +60,7 @@
           "auto_discover": "Automatically discover unknown devices"
         },
         "data_description": {
+          "paired_devices": "Comma-separated list of 6-digit hex device codes (e.g. 406B0D, 4090EA, 40B689). These are the codes of your DuoFern devices.",
           "auto_discover": "When enabled, DuoFern devices that send frames but are not yet in the device list will appear in the HA inbox."
         }
       }

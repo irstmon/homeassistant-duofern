@@ -155,6 +155,22 @@ Pair DuoFern devices by entering their 6-digit device code - **no physical butto
 
 Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired using button press method.
 
+**Action `duofern.pair_device_by_code`**
+
+The same function is available as an action, for scripts and automations:
+
+```yaml
+action: duofern.pair_device_by_code
+data:
+  device_code: "40AB12"
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `device_code` | yes | 6-digit hex code of the device to pair. Lower case is accepted. |
+
+On success the action returns `device_code` and `result: paired`, the device is added to the device list and the integration reloads. The action raises an error if the integration is not loaded, if the device does not acknowledge the pairing request, if it rejects it, or if no answer arrives in time.
+
 ### Pair by set button (connect 10-digit covers)
 
 1. Press the physical **set button** on the motor
@@ -221,6 +237,15 @@ condition:
 ```
 
 ---
+
+## Removing the Integration
+
+1. Go to **Settings → Devices & Services → DuoFern**.
+2. Open the three-dot menu of the entry and select **Delete**. All DuoFern devices and entities are removed from Home Assistant.
+3. If the integration was installed through HACS: open **HACS**, find **Rademacher DuoFern**, and select **Remove** from its menu. For a manual installation delete the folder `custom_components/duofern`.
+4. Restart Home Assistant.
+
+Removing the integration does not unpair anything: the devices stay paired with the system code of the stick. To end a pairing, unpair the device first (see [Stick Control Buttons](#stick-control-buttons)) and remove the integration afterwards.
 
 ## AI disclaimer
 Yes, this project does make use of LLMs and coding agents, and this will likely continue going forward. AI is integrated deliberately and with care.

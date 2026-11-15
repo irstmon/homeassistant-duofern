@@ -162,6 +162,17 @@ async def test_user_invalid_system_code(hass: HomeAssistant, code: str) -> None:
     assert result["errors"] == {CONF_DEVICE_CODE: "invalid_system_code"}
     check.assert_not_called()
 
+    # corrected input completes the flow
+    with patch(CHECK, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_SERIAL_PORT: MOCK_PORT, CONF_DEVICE_CODE: MOCK_SYSTEM_CODE},
+        )
+    assert result["step_id"] == "devices"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == MOCK_SYSTEM_CODE
+
 
 async def test_user_cannot_connect_then_recovers(hass: HomeAssistant) -> None:
     """A port that cannot be opened shows an error; a retry succeeds."""
@@ -179,6 +190,9 @@ async def test_user_cannot_connect_then_recovers(hass: HomeAssistant) -> None:
             result["flow_id"], user_input
         )
     assert result["step_id"] == "devices"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == MOCK_SYSTEM_CODE
 
 
 async def test_user_unknown_error(hass: HomeAssistant) -> None:
@@ -191,6 +205,16 @@ async def test_user_unknown_error(hass: HomeAssistant) -> None:
         )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "unknown"}
+
+    # the next attempt works and completes the flow
+    with patch(CHECK, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_SERIAL_PORT: MOCK_PORT, CONF_DEVICE_CODE: MOCK_SYSTEM_CODE},
+        )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == MOCK_SYSTEM_CODE
 
 
 async def test_user_already_configured(
@@ -366,6 +390,15 @@ async def test_reconfigure_cannot_connect(
     assert result["errors"] == {CONF_SERIAL_PORT: "cannot_connect"}
     assert mock_config_entry.data[CONF_SERIAL_PORT] == MOCK_PORT
 
+    # a reachable port completes the reconfiguration
+    with patch(CHECK, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: OTHER_PORT}
+        )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.data[CONF_SERIAL_PORT] == OTHER_PORT
+
 
 async def test_reconfigure_unknown_error(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry
@@ -380,6 +413,15 @@ async def test_reconfigure_unknown_error(
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "unknown"}
     assert mock_config_entry.data[CONF_SERIAL_PORT] == MOCK_PORT
+
+    # the next attempt works and completes the reconfiguration
+    with patch(CHECK, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: OTHER_PORT}
+        )
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.data[CONF_SERIAL_PORT] == OTHER_PORT
 
 
 # ---------------------------------------------------------------------------
@@ -542,6 +584,15 @@ async def test_options_invalid_code(
     assert result["errors"] == {CONF_PAIRED_DEVICES: "invalid_device_code"}
     assert mock_config_entry.data[CONF_PAIRED_DEVICES] == [MOCK_DEVICE_CODE_COVER]
     assert mock_config_entry.options == {CONF_AUTO_DISCOVER: False}
+
+    # a valid list completes the options flow
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_PAIRED_DEVICES: "406B2D, 436C1A", CONF_AUTO_DISCOVER: True},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert mock_config_entry.data[CONF_PAIRED_DEVICES] == ["406B2D", "436C1A"]
+    assert mock_config_entry.options == {CONF_AUTO_DISCOVER: True}
 
 
 # ---------------------------------------------------------------------------
