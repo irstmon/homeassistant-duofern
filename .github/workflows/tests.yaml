@@ -24,4 +24,4 @@ jobs:
         run: pip install -r requirements_test.txt
 
       - name: Run tests
-        run: pytest --cov=custom_components/duofern --cov-report=term-missing:skip-covered
+        run: pytest --cov=custom_components/duofern --cov-report=term-missing:skip-covered --cov-fail-under=95

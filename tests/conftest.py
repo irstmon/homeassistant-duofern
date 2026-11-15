@@ -42,6 +42,24 @@ MOCK_ENTRY_OPTIONS = {
 
 
 # ---------------------------------------------------------------------------
+# Home Assistant environment
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
+    """Let Home Assistant load the integration from custom_components/."""
+    return
+
+
+@pytest.fixture(autouse=True)
+def mock_usb_component() -> Generator[None, None, None]:
+    """The integration depends on "usb"; do not start real USB scanning."""
+    with patch("homeassistant.components.usb.async_setup", return_value=True):
+        yield
+
+
+# ---------------------------------------------------------------------------
 # Config entry fixture
 # ---------------------------------------------------------------------------
 
