@@ -2605,7 +2605,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Optimistic UI update so entity shows new value immediately
         state.status.readings[key] = new_value
         # Also update the dedicated ParsedStatus field if applicable so
-        # ClimateEntity.target_temperature (which reads desired_temp, not
+        # ClimateEntity.native_target_temperature (which reads desired_temp, not
         # readings) reflects the change without waiting for a status frame.
         if key == "desired-temp":
             try:

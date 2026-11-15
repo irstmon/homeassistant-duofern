@@ -119,7 +119,7 @@ class DuoFernClimate(
 
     _attr_has_entity_name = True
     _attr_name = None
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
@@ -188,7 +188,7 @@ class DuoFernClimate(
         return state.available and self.coordinator.last_update_success
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return current measured temperature.
 
         Falls back to the last restored value until the first live frame
@@ -202,7 +202,7 @@ class DuoFernClimate(
         return self._restored_measured_temp
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the desired/set temperature.
 
         Falls back to the last restored value until the first live frame
