@@ -335,6 +335,10 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # codes of devices that have not sent a status frame since startup.
         self._startup_status_pending: set[str] = set()
         self._startup_status_task: asyncio.Task[None] | None = None
+        # 6-digit codes of all devices that have sent a status frame since
+        # this coordinator was created. The replies to the status broadcast
+        # of the stick init can arrive before the startup poll is started.
+        self._status_seen: set[str] = set()
 
         # Optional callback invoked when a new device is paired via the stick's
         # pairing button. Registered by async_setup_entry in __init__.py so the
@@ -571,6 +575,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # Any status frame ends the startup poll for this device (FHEM:
         # "delete $hash->{helper}{timeout}" at the top of the status handler).
         self._startup_status_pending.discard(hex_code)
+        self._status_seen.add(hex_code)
         # FHEM only parses a status frame when its format is listed in
         # %statusGroups (30_DUOFERN.pm: "if(exists $statusGroups{$format})").
         # For any other format it still updates "version" and removes the
@@ -1437,11 +1442,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             state.device_code.hex
             for state in self.data.devices.values()
             if state.device_code.device_type in STARTUP_STATUS_POLL_TYPES
+            and state.device_code.hex not in self._status_seen
         }
         if self._startup_status_task and not self._startup_status_task.done():
             self._startup_status_task.cancel()
-        self._startup_status_task = self.hass.async_create_task(
-            self._startup_status_poll()
+        # Background task: it sleeps for up to 3 x STARTUP_STATUS_TIMEOUT. A
+        # normal task would be awaited by hass.async_block_till_done() and
+        # hold back the end of the Home Assistant startup for that long.
+        self._startup_status_task = self.config_entry.async_create_background_task(
+            self.hass,
+            self._startup_status_poll(),
+            name="duofern_startup_status_poll",
         )
 
     async def _startup_status_poll(self) -> None:
