@@ -48,3 +48,4 @@ NOTES.md
 .coverage
 .pytest_cache/
 htmlcov/
+tests/testing_config/

@@ -15,12 +15,9 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
-from unittest.mock import patch
 
-from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-import custom_components.duofern as integration
 from custom_components.duofern.coordinator import DuoFernCoordinator
 from custom_components.duofern.protocol import DuoFernDecoder, DuoFernId
 
@@ -58,16 +55,11 @@ BOOST_OFF = "0D011D800000000000000002000000000000E14A0F00"
 MANUAL_ON = "0D011D800005000000000000000000000000E14A0F00"
 EMPTY_REPLY = "0D011D800000000000000000000000000000E14A0F00"
 
-# Climate entities need Home Assistant 2026.11 (see common.CLIMATE_TYPES); the
-# protocol is driven on the coordinator, so the climate platform is left out.
-PLATFORMS_WITHOUT_CLIMATE = [p for p in integration.PLATFORMS if p != Platform.CLIMATE]
-
 
 @asynccontextmanager
 async def _hsa_environment() -> AsyncGenerator[None]:
-    with patch.object(integration, "PLATFORMS", PLATFORMS_WITHOUT_CLIMATE):
-        async with fake_stick():
-            yield
+    async with fake_stick():
+        yield
 
 
 class _Scenario:

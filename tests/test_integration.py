@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 from unittest.mock import patch
 
 from custom_components.duofern import coordinator as coordinator_module
@@ -117,6 +117,7 @@ async def test_setup_all_device_types(
         assert {e.domain for e in entities} == {
             "binary_sensor",
             "button",
+            "climate",
             "cover",
             "event",
             "light",
@@ -663,6 +664,12 @@ async def test_every_entity_handles_its_services(
                     await call("light", "turn_on", target, brightness=128)
                     await call("light", "turn_off", target)
                     await call("light", "toggle", target)
+                elif reg_entry.domain == "climate":
+                    await call("climate", "set_temperature", target, temperature=21.5)
+                    await call("climate", "set_hvac_mode", target, hvac_mode="off")
+                    await call("climate", "set_hvac_mode", target, hvac_mode="heat")
+                    await call("climate", "turn_off", target)
+                    await call("climate", "turn_on", target)
                 elif reg_entry.domain == "text":
                     await call("text", "set_value", target, value="40AB12")
                     await call("text", "set_value", target, value="")
@@ -680,4 +687,44 @@ async def test_every_entity_handles_its_services(
             and r.name.startswith("custom_components.duofern")
         ]
         assert not errors, errors[:5]
+        await unload_entry(hass, entry)
+
+
+# ---------------------------------------------------------------------------
+# Climate entities (Heizkörperantrieb 0xE1, Raumthermostat 0x73)
+# ---------------------------------------------------------------------------
+
+
+async def test_climate_entities_show_status_frames(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Status frames reach the climate entities; no deprecation is logged.
+
+    The 0xE1 frame is a recording of a real actuator. For the Raumthermostat
+    no recording exists; its frame is constructed.
+    """
+    async with fake_stick():
+        entry = make_entry(hass, ["E14A0F", "737AF9"])
+        with caplog.at_level(logging.WARNING):
+            coordinator = await setup_entry(hass, entry)
+            feed(coordinator, "0FFF0F29D40917008042642A04140AE14A0F6F5C7E01")
+            feed(coordinator, "0FFF0F270A5817FF7B727B7222581C737AF9FFFFFF01")
+            await hass.async_block_till_done()
+
+        actuator = _state(hass, "climate", "duofern_E14A0F")
+        assert actuator.state == "heat"
+        assert actuator.attributes["temperature"] == 14.0
+        assert actuator.attributes["current_temperature"] == 23.3
+        assert actuator.attributes["min_temp"] == 4.0
+        assert actuator.attributes["max_temp"] == 28.0
+        assert actuator.attributes["target_temp_step"] == 0.5
+
+        thermostat = _state(hass, "climate", "duofern_737AF9")
+        assert thermostat.state == "off"  # setpoint at the 4 degC minimum
+        assert thermostat.attributes["temperature"] == 4.0
+        assert thermostat.attributes["current_temperature"] == 20.0
+        assert thermostat.attributes["max_temp"] == 40.0
+        assert thermostat.attributes["hvac_action"] == "heating"  # output "on"
+
+        assert "deprecated" not in caplog.text
         await unload_entry(hass, entry)

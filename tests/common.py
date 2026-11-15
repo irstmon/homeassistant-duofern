@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.duofern import coordinator as coordinator_module
 from custom_components.duofern.const import (
@@ -27,13 +27,7 @@ from custom_components.duofern.coordinator import DuoFernCoordinator
 
 SYSTEM_CODE = "6F1A2B"
 
-# Raumthermostat (0x73) and Heizkörperantrieb (0xE1) create climate entities.
-# These use the native_* temperature API of Home Assistant 2026.11; the test
-# plugin still installs an older Home Assistant, so they are left out of the
-# tests that set up entities until the plugin supports 2026.11.
-CLIMATE_TYPES = (0x73, 0xE1)
-
-ALL_TYPES = sorted(t for t in DEVICE_TYPES if t not in CLIMATE_TYPES)
+ALL_TYPES = sorted(DEVICE_TYPES)
 ALL_DEVICES = [f"{t:02X}A1B2" for t in ALL_TYPES]
 
 

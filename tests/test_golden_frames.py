@@ -36,6 +36,9 @@ from .common import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+# Real status frame of a Heizkörperantrieb (boost off), code mapped to E1A1B2.
+HSA_STATUS = "0FFF0F29D40917008042642A04140AE1A1B26F5C7E01"
+
 
 def _same(actual: object, expected: object) -> bool:
     """Compare a reading: equal as text, or equal as number."""
@@ -56,11 +59,22 @@ async def test_commands_send_the_frames_fhem_sends(hass: HomeAssistant) -> None:
         entry = make_entry(hass, ALL_DEVICES)
         await setup_entry(hass, entry)
         await enable_all_entities(hass, entry)
+        coordinator = entry.runtime_data
         stick = FakeStick.instances[-1]
 
         wrong: list[str] = []
         for case in cases:
             target = entity_id(hass, case["domain"], case["unique_id"])
+            # The Heizkörperantrieb only takes commands as an answer to its
+            # own status frame: start from a clean state, queue the change,
+            # then let the actuator "send" its status.
+            answer_to_status = case.get("answer_to_status", False)
+            if answer_to_status:
+                state = coordinator.data.devices["E1A1B2"]
+                state.hsa_pending.clear()
+                state.status = ParsedStatus()
+                feed(coordinator, HSA_STATUS)
+                await hass.async_block_till_done()
             stick.sent.clear()
             await hass.services.async_call(
                 case["domain"],
@@ -68,6 +82,8 @@ async def test_commands_send_the_frames_fhem_sends(hass: HomeAssistant) -> None:
                 {"entity_id": target, **case["data"]},
                 blocking=True,
             )
+            if answer_to_status:
+                feed(coordinator, HSA_STATUS)
             await hass.async_block_till_done()
             if stick.sent != case["frames"]:
                 wrong.append(
