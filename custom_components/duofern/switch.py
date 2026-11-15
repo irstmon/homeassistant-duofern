@@ -879,7 +879,14 @@ class DuoFernAutomationSwitch(
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
-        self._device_code = device_state.device_code
+        # Universalaktor (0x43): the command frame has to carry this entity's
+        # channel (FHEM: cc = chanNo), so the coordinator gets the channel-
+        # carrying code. Every other device keeps the plain 6-digit code.
+        self._device_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.device_code.device_type == 0x43 and device_state.channel
+            else device_state.device_code
+        )
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}_auto"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
