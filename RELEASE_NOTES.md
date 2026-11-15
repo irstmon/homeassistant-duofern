@@ -26,6 +26,6 @@
 - **Fixed:** a device that is not reachable is no longer polled every 30 seconds forever after a command; it is asked at most 4 times.
 - **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
 - **Changed:** requires Home Assistant 2026.11 or newer. The climate entities (Heizkörperantrieb, Raumthermostat) use the new temperature API, the deprecation warnings at startup are gone.
-- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s. A device that still has not answered about 90 s after startup is shown as unavailable until it reports again.
+- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s. A device that still has not answered about 90 s after startup is shown as unavailable until it reports again, also across restarts.
 - **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
 - **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.

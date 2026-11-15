@@ -53,7 +53,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_DEVICE_CODE, CONF_PAIRED_DEVICES, CONF_SERIAL_PORT, DOMAIN
-from .coordinator import DuoFernCoordinator
+from .coordinator import DuoFernCoordinator, missing_status_store
 from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
@@ -134,6 +134,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
         system_code=system_code,
         paired_devices=paired_devices,
     )
+
+    # Devices that did not answer the last startup status poll start as
+    # unavailable. Must happen before the stick is connected: the replies to
+    # the init broadcast make such a device available again.
+    await coordinator.async_load_missing_status()
 
     try:
         await coordinator.async_connect()
@@ -256,6 +261,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> 
         await coordinator.async_disconnect()
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> None:
+    """Delete the stored list of silent devices when the entry is removed."""
+    await missing_status_store(hass, entry.entry_id).async_remove()
 
 
 async def _async_cleanup_stale_devices(

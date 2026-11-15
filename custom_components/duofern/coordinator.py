@@ -56,6 +56,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.config_entries import SOURCE_INTEGRATION_DISCOVERY
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -286,6 +287,13 @@ class DuoFernData:
     registered_unique_ids: set[tuple[str, str] | str] = field(default_factory=set)
 
 
+def missing_status_store(
+    hass: HomeAssistant, entry_id: str
+) -> Store[dict[str, list[str]]]:
+    """Return the .storage file that holds the devices without startup status."""
+    return Store(hass, 1, f"{DOMAIN}.{entry_id}.missing_status")
+
+
 class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     """Push-based coordinator for the DuoFern integration.
 
@@ -339,6 +347,15 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # this coordinator was created. The replies to the status broadcast
         # of the stick init can arrive before the startup poll is started.
         self._status_seen: set[str] = set()
+        # 6-digit codes of devices that did not answer the last startup
+        # status poll. Persisted so that such a device starts as unavailable
+        # after the next restart instead of showing its restored values for
+        # another 90 s (FHEM keeps "MISSING STATUS" in its statefile). A
+        # device is removed again by its next status frame.
+        self._missing_status: set[str] = set()
+        self._missing_status_store: Store[dict[str, list[str]]] = missing_status_store(
+            hass, config_entry.entry_id
+        )
 
         # Optional callback invoked when a new device is paired via the stick's
         # pairing button. Registered by async_setup_entry in __init__.py so the
@@ -576,6 +593,9 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         # "delete $hash->{helper}{timeout}" at the top of the status handler).
         self._startup_status_pending.discard(hex_code)
         self._status_seen.add(hex_code)
+        if hex_code in self._missing_status:
+            self._missing_status.discard(hex_code)
+            self._save_missing_status()
         # FHEM only parses a status frame when its format is listed in
         # %statusGroups (30_DUOFERN.pm: "if(exists $statusGroups{$format})").
         # For any other format it still updates "version" and removes the
@@ -1495,10 +1515,56 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                             continue
                         state.available = False
                 self.async_set_updated_data(self.data)
+            # Remember the result for the next start. Only reached when the
+            # poll ran to its end (not on unload / reload).
+            if self._missing_status != self._startup_status_pending:
+                self._missing_status = set(self._startup_status_pending)
+                self._save_missing_status()
         except asyncio.CancelledError:
             pass
         finally:
             self._startup_status_pending.clear()
+
+    async def async_load_missing_status(self) -> None:
+        """Mark devices unavailable that did not answer the last startup poll.
+
+        Called once from async_setup_entry before the stick is connected, so
+        the entities are created with the right availability. Only devices
+        from the stored list are touched; every other device starts as
+        available, as before. Codes of devices that are no longer paired are
+        dropped.
+        """
+        try:
+            stored = await self._missing_status_store.async_load()
+        except Exception:  # noqa: BLE001 - a broken file must not block setup
+            _LOGGER.warning("Could not read the stored list of silent devices")
+            return
+        codes = stored.get("devices") if isinstance(stored, dict) else None
+        if not isinstance(codes, list):
+            return
+        for hex_code in codes:
+            if not isinstance(hex_code, str) or not validate_device_code(hex_code):
+                continue
+            states = self._states_for(DuoFernId.from_hex(hex_code))
+            if not states:
+                continue
+            self._missing_status.add(hex_code.upper())
+            for state in states:
+                if state.channel == "00":
+                    continue
+                state.available = False
+        if self._missing_status:
+            _LOGGER.debug(
+                "Devices without status at the last startup, starting as "
+                "unavailable: %s",
+                sorted(self._missing_status),
+            )
+
+    def _save_missing_status(self) -> None:
+        """Write the list of silent devices to .storage (delayed)."""
+        self._missing_status_store.async_delay_save(
+            lambda: {"devices": sorted(self._missing_status)}, 1.0
+        )
 
     def _cancel_status_timeout(self, state: "DuoFernDeviceState") -> None:
         """Cancel any running status-timeout loop for this device.
