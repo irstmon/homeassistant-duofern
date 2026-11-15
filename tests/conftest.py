@@ -65,9 +65,9 @@ def mock_config_entry() -> MockConfigEntry:
 
 @pytest.fixture
 def mock_serial_port_valid() -> Generator[None, None, None]:
-    """Patch _check_serial_port to return True (port exists)."""
+    """Patch check_serial_connection to return True (port exists)."""
     with patch(
-        "custom_components.duofern.config_flow._check_serial_port",
+        "custom_components.duofern.config_flow.check_serial_connection",
         return_value=True,
     ):
         yield
@@ -75,9 +75,9 @@ def mock_serial_port_valid() -> Generator[None, None, None]:
 
 @pytest.fixture
 def mock_serial_port_missing() -> Generator[None, None, None]:
-    """Patch _check_serial_port to return False (port not found)."""
+    """Patch check_serial_connection to return False (port not found)."""
     with patch(
-        "custom_components.duofern.config_flow._check_serial_port",
+        "custom_components.duofern.config_flow.check_serial_connection",
         return_value=False,
     ):
         yield
