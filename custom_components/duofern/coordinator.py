@@ -249,6 +249,10 @@ class DuoFernDeviceState:
     # (1-5), value is (angle_or_height, width) as set by the user.
     sun_direction_memory: dict[int, tuple[float, float]] = field(default_factory=dict)
     sun_height_memory: dict[int, tuple[float, float]] = field(default_factory=dict)
+    # Umweltsensor sun trigger: temperature value per slot while "Mit
+    # Temperatur verknüpfen" is off. FHEM writes the temperature bits as 0 in
+    # that case, so the value cannot be kept in the register.
+    sun_temp_memory: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -3600,7 +3604,16 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         sun_min = ((w >> 19) & 0x1F) + 1
         shadow_min = ((w >> 24) & 0x1F) + 1
         temp_enabled = bool(w & 0x40)
-        temp = ((w >> 7) & 0x1F) - 5 if temp_enabled else 0
+        temp = (
+            ((w >> 7) & 0x1F) - 5
+            if temp_enabled
+            else state.sun_temp_memory.get(
+                slot,
+                # Registers written by versions before 2.4.0 still carry the
+                # value in the temperature bits while the link is off.
+                ((w >> 7) & 0x1F) - 5 if (w >> 7) & 0x1F else 0,
+            )
+        )
         return (enabled, klux, sun_min, shadow_min, temp_enabled, temp)
 
     async def async_set_trigger_sun_slot_enabled(
@@ -3656,14 +3669,27 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
     async def async_set_trigger_sun_slot_temp_enabled(
         self, device_code: DuoFernId, slot: int, enabled: bool
     ) -> None:
-        """Toggle "Mit Temperatur verknüpfen" without touching the temp value bits."""
+        """Toggle "Mit Temperatur verknüpfen".
+
+        FHEM (30_DUOFERN.pm, set triggerSun) builds the slot value from its
+        arguments: without a temperature, bit 0x40 and the temperature bits
+        7-11 are 0. Switching the link off therefore clears both, and the
+        temperature is kept in sun_temp_memory for switching it on again.
+        """
         state = self.data.devices.get(device_code.hex + "00")
         if state is None:
             return
         reg, byte = self._SUN_POS[slot - 1]
-        self._set_weather_config_word32(
-            state, reg, byte, 0x40 if enabled else 0x00, 0x40
-        )
+        if enabled:
+            temp = self.get_trigger_sun_slot(device_code, slot)[5]
+            self._set_weather_config_word32(
+                state, reg, byte, ((temp + 5) << 7) | 0x40, 0x00000FC0
+            )
+        else:
+            w = self._get_reg_word32(state, reg, byte)
+            if w & 0x40:
+                state.sun_temp_memory[slot] = ((w >> 7) & 0x1F) - 5
+            self._set_weather_config_word32(state, reg, byte, 0x00, 0x00000FC0)
 
     async def async_set_trigger_sun_slot_temp(
         self, device_code: DuoFernId, slot: int, temp: int
@@ -3673,6 +3699,12 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             return
         temp = max(-5, min(26, temp))
         reg, byte = self._SUN_POS[slot - 1]
+        if not self._get_reg_word32(state, reg, byte) & 0x40:
+            # Link is off: the register keeps 0 in the temperature bits (as
+            # FHEM writes it), the value is only remembered.
+            state.sun_temp_memory[slot] = int(temp)
+            self.async_set_updated_data(self.data)
+            return
         self._set_weather_config_word32(state, reg, byte, (temp + 5) << 7, 0x00000F80)
 
     # --- SunDirection / SunHeight: regs3-5, share one 32-bit word per slot ---
