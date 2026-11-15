@@ -25,6 +25,6 @@
 - **Fixed:** Universalaktor (`0x43`) and the actor channels of Bewegungsmelder (`0x65`), Umweltsensor (`0x69`) and Wandtaster 6fach 230V (`0x74`) are now shown as unavailable when they do not acknowledge a command, and their state is requested again after a command.
 - **Fixed:** a device that is not reachable is no longer polled every 30 seconds forever after a command; it is asked at most 4 times.
 - **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
-- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s.
+- **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s. A device that still has not answered about 90 s after startup is shown as unavailable until it reports again.
 - **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
 - **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.

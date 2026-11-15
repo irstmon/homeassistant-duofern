@@ -1477,9 +1477,24 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
             await asyncio.sleep(STARTUP_STATUS_TIMEOUT)
             if self._startup_status_pending:
                 _LOGGER.info(
-                    "No status received after startup from: %s",
+                    "No status received after startup from: %s - marking unavailable",
                     sorted(self._startup_status_pending),
                 )
+                # FHEM (DUOFERN_StatusTimeout) sets the state "MISSING STATUS"
+                # on the device and its channels after the last unanswered
+                # request. The stick only confirms that it accepted a status
+                # request (81000000...), it does not report 810108AA when the
+                # device stays silent, so this is the only place where a
+                # device that no longer answers can be detected after startup.
+                # The next status frame makes it available again
+                # (_handle_status). The "00" sub-channel of 0x65/0x69/0x74 is
+                # left out, as in _handle_missing_ack.
+                for hex_code in self._startup_status_pending:
+                    for state in self._states_for(DuoFernId.from_hex(hex_code)):
+                        if state.channel == "00":
+                            continue
+                        state.available = False
+                self.async_set_updated_data(self.data)
         except asyncio.CancelledError:
             pass
         finally:
