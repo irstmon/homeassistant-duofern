@@ -699,6 +699,46 @@ async def test_pair_by_code_with_ten_digit_code(hass: HomeAssistant) -> None:
         await unload_entry(hass, entry)
 
 
+async def test_pair_by_code_second_pair_response_does_not_reload_early(
+    hass: HomeAssistant,
+) -> None:
+    """The device answers both pair frames at once: StopPair still goes out.
+
+    The second 0602 used to run into the normal pairing path, which wrote
+    the config entry and reloaded the integration before StopPair was sent.
+    """
+    async with fake_stick():
+        entry = make_entry(hass, ["40A1B2"])
+        coordinator = await setup_entry(hass, entry)
+        stick = FakeStick.instances[-1]
+        instances = len(FakeStick.instances)
+        sent: list[str] = []
+
+        async def send(frame: bytearray) -> None:
+            sent.append(bytes(frame).hex().upper())
+            if frame[0] == 0x0D and frame[2] == 0x06:
+                answer = bytearray.fromhex(
+                    "06020200000000000000000000000046ABCD00000000"
+                )
+                hass.loop.call_soon(coordinator._on_message, answer)
+
+        stick.send_command = send  # type: ignore[method-assign]
+        with patch("custom_components.duofern.coordinator.REMOTE_PAIR_TIMEOUT", 0.5):
+            await hass.services.async_call(
+                DOMAIN,
+                "pair_device_by_code",
+                {"device_code": "46ABCD"},
+                blocking=True,
+                return_response=True,
+            )
+        assert [f[:8] for f in sent].count("0DFF0601") == 2
+        assert sent[-1][:2] == "05"  # StopPair, sent before the reload
+        await hass.async_block_till_done()
+        assert entry.data[CONF_PAIRED_DEVICES] == ["40A1B2", "46ABCD"]
+        assert len(FakeStick.instances) == instances + 1  # exactly one reload
+        await unload_entry(hass, entry)
+
+
 # ---------------------------------------------------------------------------
 # Pair by code: the three ways it can fail
 # ---------------------------------------------------------------------------

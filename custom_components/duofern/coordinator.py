@@ -1663,6 +1663,17 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 pair_future.set_result("CC")
                 _LOGGER.info("Pair-by-code: 0602 received for %s — success!", pair_hex)
                 return  # Let async_pair_device_by_code handle persistence
+            # A second 0602 for the same device before async_pair_device_by_code
+            # has continued (the pair frame is sent twice): already counted as
+            # success. Falling through would persist and reload from here,
+            # before StopPair is sent.
+            if (
+                device_code.hex == pair_hex
+                and not pair_future.cancelled()
+                and pair_future.result() == "CC"
+            ):
+                _LOGGER.debug("Pair-by-code: repeated 0602 for %s ignored", pair_hex)
+                return
 
         state = self.data.devices.get(device_code.hex)
         if state:
