@@ -21,6 +21,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -36,7 +37,7 @@ from .const import (
     DOMAIN,
 )
 from .protocol import validate_device_code, validate_system_code
-from .serial_connection import check_serial_connection
+from .serial_connection import check_serial_connection, is_duofern_stick
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +77,10 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                     if not port_valid:
                         errors[CONF_SERIAL_PORT] = "cannot_connect"
+                    elif not await self.hass.async_add_executor_job(
+                        is_duofern_stick, serial_port
+                    ):
+                        errors[CONF_SERIAL_PORT] = "not_a_duofern_stick"
                 except Exception:
                     _LOGGER.exception("Error checking serial port")
                     errors["base"] = "unknown"
@@ -179,6 +184,17 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 if not port_valid:
                     errors[CONF_SERIAL_PORT] = "cannot_connect"
+                # Ask the stick itself only on a port that is not the one
+                # the loaded integration is using right now: that stick is
+                # initialised and in operation, an init frame from a second
+                # connection would disturb it.
+                elif not (
+                    entry.state is ConfigEntryState.LOADED
+                    and serial_port == entry.data.get(CONF_SERIAL_PORT)
+                ) and not await self.hass.async_add_executor_job(
+                    is_duofern_stick, serial_port
+                ):
+                    errors[CONF_SERIAL_PORT] = "not_a_duofern_stick"
             except Exception:
                 _LOGGER.exception("Error checking serial port during reconfigure")
                 errors["base"] = "unknown"

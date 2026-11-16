@@ -40,6 +40,7 @@
     },
     "error": {
       "cannot_connect": "Verbindung zum DuoFern-Stick fehlgeschlagen. Überprüfen Sie den seriellen Pfad oder die Netzwerk-URL.",
+      "not_a_duofern_stick": "Das Gerät an diesem Anschluss antwortet nicht wie ein DuoFern-USB-Stick. Überprüfen Sie, ob der richtige Anschluss gewählt ist.",
       "invalid_system_code": "Ungültiger Systemcode. Muss 6 Hex-Ziffern haben und mit 6F beginnen.",
       "invalid_device_code": "Ein oder mehrere Gerätecodes sind ungültig. Jeder muss genau 6 Hex-Ziffern haben.",
       "unknown": "Ein unerwarteter Fehler ist aufgetreten."

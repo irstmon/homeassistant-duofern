@@ -16,6 +16,7 @@ from custom_components.duofern.serial_connection import (
     _ThreadedSerialTransport,
     check_serial_connection,
     create_serial_connection,
+    is_duofern_stick,
     validate_serial_location,
 )
 
@@ -212,3 +213,74 @@ async def test_transport_write_error_is_reported() -> None:
     await _wait_for(lambda: protocol.connection_lost.called)
     protocol.connection_lost.assert_called_once_with(error)
     assert transport.is_closing() and fake.closed.is_set()
+
+
+# ---------------------------------------------------------------------------
+# is_duofern_stick
+# ---------------------------------------------------------------------------
+
+INIT1 = bytes.fromhex("01" + "00" * 21)
+STICK_ANSWER = bytes.fromhex("81" + "00" * 21)  # as logged from a real stick
+
+
+def _probe_connection(answer: bytes) -> MagicMock:
+    connection = MagicMock()
+    connection.read.return_value = answer
+    return connection
+
+
+def test_stick_answer_is_recognised() -> None:
+    connection = _probe_connection(STICK_ANSWER)
+    with patch.object(serial, "serial_for_url", return_value=connection) as opener:
+        assert is_duofern_stick("/dev/ttyUSB0") is True
+    opener.assert_called_once_with(
+        "/dev/ttyUSB0", baudrate=SERIAL_BAUDRATE, timeout=2, write_timeout=1
+    )
+    connection.write.assert_called_once_with(INIT1)
+    connection.read.assert_called_once_with(22)
+    connection.close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("location", "timeout"),
+    [
+        ("/dev/ttyUSB0", 2),
+        ("COM3", 2),
+        ("socket://192.168.1.50:4001", 5),
+        ("rfc2217://192.168.1.50:4001", 5),
+        ("RFC2217://stick.local:4001", 5),
+    ],
+)
+def test_network_ports_get_more_time_to_answer(location: str, timeout: int) -> None:
+    """ser2net and similar add latency: 5 s instead of 2 s for the answer."""
+    connection = _probe_connection(STICK_ANSWER)
+    with patch.object(serial, "serial_for_url", return_value=connection) as opener:
+        assert is_duofern_stick(location) is True
+    assert opener.call_args.kwargs["timeout"] == timeout
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [b"", STICK_ANSWER[:10], bytes(22), b"OK\r\n", bytes.fromhex("0F" + "00" * 21)],
+)
+def test_other_answers_are_not_a_stick(answer: bytes) -> None:
+    connection = _probe_connection(answer)
+    with patch.object(serial, "serial_for_url", return_value=connection):
+        assert is_duofern_stick("/dev/ttyUSB0") is False
+    connection.close.assert_called_once()
+
+
+def test_probe_port_cannot_be_opened() -> None:
+    with patch.object(
+        serial, "serial_for_url", side_effect=serial.SerialException("busy")
+    ):
+        assert is_duofern_stick("/dev/ttyUSB9") is False
+
+
+@pytest.mark.parametrize("failing", ["write", "read"])
+def test_probe_io_error_closes_the_port(failing: str) -> None:
+    connection = _probe_connection(STICK_ANSWER)
+    getattr(connection, failing).side_effect = serial.SerialException("gone")
+    with patch.object(serial, "serial_for_url", return_value=connection):
+        assert is_duofern_stick("/dev/ttyUSB0") is False
+    connection.close.assert_called_once()

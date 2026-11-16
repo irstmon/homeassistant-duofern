@@ -334,9 +334,15 @@ async def test_reload_pair_service_reconfigure_unload(hass: HomeAssistant) -> No
         # reconfigure with a new port: exactly one reload
         instances = len(FakeStick.instances)
         result = await entry.start_reconfigure_flow(hass)
-        with patch(
-            "custom_components.duofern.config_flow.check_serial_connection",
-            return_value=True,
+        with (
+            patch(
+                "custom_components.duofern.config_flow.check_serial_connection",
+                return_value=True,
+            ),
+            patch(
+                "custom_components.duofern.config_flow.is_duofern_stick",
+                return_value=True,
+            ),
         ):
             result = await hass.config_entries.flow.async_configure(
                 result["flow_id"], {CONF_SERIAL_PORT: "/dev/ttyUSB7"}

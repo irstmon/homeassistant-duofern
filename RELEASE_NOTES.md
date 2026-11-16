@@ -27,6 +27,7 @@
 - **Fixed:** Heizkörperantrieb (`0xE1`) gets a reply when it asks for one, even if no change is pending.
 - **Changed:** Umweltsensor sun Grenzwert: switching "Mit Temperatur verknüpfen" off now clears the temperature in the device configuration as FHEM does; the value is remembered and restored when switched on again.
 - **Changed:** the action `duofern.pair_device_by_code` is always available while the integration is loaded and reports a clear error when the DuoFern entry is not loaded.
+- **Changed:** setup checks that a DuoFern stick answers on the selected port and reports a clear error otherwise.
 - **Changed:** requires Home Assistant 2026.11 or newer. The climate entities (Heizkörperantrieb, Raumthermostat) use the new temperature API, the deprecation warnings at startup are gone.
 - **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s. A device that still has not answered about 90 s after startup is shown as unavailable until it reports again, also across restarts.
 - **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).

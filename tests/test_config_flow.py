@@ -15,6 +15,7 @@ from homeassistant.config_entries import (
     SOURCE_INTEGRATION_DISCOVERY,
     SOURCE_USB,
     SOURCE_USER,
+    ConfigEntryState,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -33,6 +34,7 @@ from custom_components.duofern.const import (
 from .conftest import MOCK_DEVICE_CODE_COVER, MOCK_PORT, MOCK_SYSTEM_CODE
 
 CHECK = "custom_components.duofern.config_flow.check_serial_connection"
+PROBE = "custom_components.duofern.config_flow.is_duofern_stick"
 OTHER_PORT = "/dev/ttyUSB1"
 NETWORK_PORT = "socket://192.168.1.50:4001"
 
@@ -57,7 +59,10 @@ def _flow_environment(
     The integration depends on the "usb" component; its setup is patched so
     the flows do not start USB scanning.
     """
-    with patch("homeassistant.components.usb.async_setup", return_value=True):
+    with (
+        patch("homeassistant.components.usb.async_setup", return_value=True),
+        patch(PROBE, return_value=True),
+    ):
         yield
 
 
@@ -617,3 +622,104 @@ async def test_options_invalid_code(
 def test_parse_device_codes(raw: str, expected: list[str]) -> None:
     """Codes are split on commas and whitespace, upper-cased and deduplicated."""
     assert _parse_device_codes(raw) == expected
+
+
+# ---------------------------------------------------------------------------
+# The port opens, but no DuoFern stick answers
+# ---------------------------------------------------------------------------
+
+
+async def test_user_port_without_duofern_stick_then_recovers(
+    hass: HomeAssistant,
+) -> None:
+    """A port that opens but does not answer like a stick is refused."""
+    result = await _start_user_flow(hass)
+    user_input = {CONF_SERIAL_PORT: MOCK_PORT, CONF_DEVICE_CODE: MOCK_SYSTEM_CODE}
+    with patch(CHECK, return_value=True), patch(PROBE, return_value=False) as probe:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input
+        )
+    probe.assert_called_once_with(MOCK_PORT)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_SERIAL_PORT: "not_a_duofern_stick"}
+
+    with patch(CHECK, return_value=True), patch(PROBE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input
+        )
+    assert result["step_id"] == "devices"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == MOCK_SYSTEM_CODE
+
+
+async def test_user_port_that_cannot_be_opened_is_not_probed(
+    hass: HomeAssistant,
+) -> None:
+    result = await _start_user_flow(hass)
+    with patch(CHECK, return_value=False), patch(PROBE) as probe:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_SERIAL_PORT: MOCK_PORT, CONF_DEVICE_CODE: MOCK_SYSTEM_CODE},
+        )
+    assert result["errors"] == {CONF_SERIAL_PORT: "cannot_connect"}
+    probe.assert_not_called()
+
+
+async def test_reconfigure_other_port_without_stick_then_recovers(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """A different port is probed; without a stick the data stays unchanged."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    with patch(CHECK, return_value=True), patch(PROBE, return_value=False) as probe:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: OTHER_PORT}
+        )
+    probe.assert_called_once_with(OTHER_PORT)
+    assert result["errors"] == {CONF_SERIAL_PORT: "not_a_duofern_stick"}
+    assert mock_config_entry.data[CONF_SERIAL_PORT] == MOCK_PORT
+
+    with patch(CHECK, return_value=True), patch(PROBE, return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: OTHER_PORT}
+        )
+    assert result["reason"] == "reconfigure_successful"
+    assert mock_config_entry.data[CONF_SERIAL_PORT] == OTHER_PORT
+
+
+async def test_reconfigure_port_in_use_is_not_probed(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """The port of the loaded integration is in operation and must not get an init frame."""
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    with (
+        patch(CHECK, return_value=True),
+        patch(PROBE, return_value=False) as probe,
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: MOCK_PORT}
+        )
+    probe.assert_not_called()
+    assert result["reason"] == "reconfigure_successful"
+
+
+async def test_reconfigure_same_port_is_probed_when_not_loaded(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """With the integration not loaded nothing is using the port: probe it."""
+    mock_config_entry.add_to_hass(hass)
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    with (
+        patch(CHECK, return_value=True),
+        patch(PROBE, return_value=True) as probe,
+        patch.object(hass.config_entries, "async_schedule_reload"),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: MOCK_PORT}
+        )
+    probe.assert_called_once_with(MOCK_PORT)
+    assert result["reason"] == "reconfigure_successful"

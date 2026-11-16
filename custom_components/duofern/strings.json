@@ -40,6 +40,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the DuoFern stick. Check the serial path or network URL.",
+      "not_a_duofern_stick": "The device on this port does not answer like a DuoFern USB stick. Check that the right port is selected.",
       "invalid_system_code": "Invalid system code. Must be 6 hex digits starting with 6F.",
       "invalid_device_code": "One or more device codes are invalid. Each must be exactly 6 hex digits.",
       "unknown": "An unexpected error occurred."
