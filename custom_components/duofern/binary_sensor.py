@@ -46,15 +46,14 @@ from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
 )
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -348,9 +347,7 @@ async def async_setup_entry(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBinarySensor(
-    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
-):
+class DuoFernBinarySensor(DuoFernEntity, BinarySensorEntity, RestoreEntity):
     """A DuoFern motion/smoke/contact sensor as a HA BinarySensorEntity.
 
     State is updated via HA event bus (duofern_event) because these devices
@@ -361,7 +358,6 @@ class DuoFernBinarySensor(
       Events dispatched via DUOFERN_Parse -> Dispatch -> here.
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
 
     def __init__(
@@ -470,29 +466,19 @@ class DuoFernBinarySensor(
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -501,9 +487,7 @@ class DuoFernBinarySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernWindowSensor(
-    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
-):
+class DuoFernWindowSensor(DuoFernEntity, BinarySensorEntity, RestoreEntity):
     """A single binary sensor for the DuoFern window/door contact sensor (0xAC).
 
     Two instances are created per device:
@@ -521,7 +505,6 @@ class DuoFernWindowSensor(
     which could be hours if the window/door remains in the same state.
     """
 
-    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.WINDOW
 
     # Events that set this specific instance to True; any other relevant
@@ -627,29 +610,19 @@ class DuoFernWindowSensor(
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -658,7 +631,7 @@ class DuoFernWindowSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity):
+class DuoFernObstacleSensor(DuoFernEntity, BinarySensorEntity):
     """A status-frame-based binary sensor for SX5 obstacle detection.
 
     These entities are read directly from the SX5 status frame (format 24a)
@@ -679,8 +652,6 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
     device state readings for persistent display.
     """
 
-    _attr_has_entity_name = True
-
     def __init__(
         self,
         coordinator: DuoFernCoordinator,
@@ -699,9 +670,7 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
         self._attr_translation_key = translation_key
         self._attr_device_class = device_class
         self._attr_icon = icon
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hex_code)},
-        )
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -738,29 +707,19 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -769,9 +728,7 @@ class DuoFernObstacleSensor(CoordinatorEntity[DuoFernCoordinator], BinarySensorE
 # ---------------------------------------------------------------------------
 
 
-class DuoFernEnvBinarySensor(
-    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
-):
+class DuoFernEnvBinarySensor(DuoFernEntity, BinarySensorEntity, RestoreEntity):
     """Binary sensor for sun or wind detection events.
 
     Two cases:
@@ -787,8 +744,6 @@ class DuoFernEnvBinarySensor(
       070D startWind state=on  (A9, AA)
       070E endWind   state=off
     """
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -845,20 +800,13 @@ class DuoFernEnvBinarySensor(
         For 0x61 (is_own_device=False): attaches to the existing cover device.
         """
         if self._is_own_device:
-            return DeviceInfo(
-                identifiers={(DOMAIN, self._hex_code)},
-                name=(
-                    f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"
-                ),
-                manufacturer="Rademacher",
-                model=self._device_code.device_type_name,
-                serial_number=self._hex_code,
-                via_device_id=self.coordinator.stick_device_id,
+            return device_description(
+                self.coordinator,
+                self._device_code,
+                self._hex_code,
             )
         # Cover device (0x61): attach to the existing device entry
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-        )
+        return device_link(self._hex_code)
 
     @callback
     def _handle_duofern_event(self, event: Event) -> None:
@@ -880,9 +828,7 @@ class DuoFernEnvBinarySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernRainBinarySensor(
-    CoordinatorEntity[DuoFernCoordinator], BinarySensorEntity, RestoreEntity
-):
+class DuoFernRainBinarySensor(DuoFernEntity, BinarySensorEntity, RestoreEntity):
     """Binary sensor: is it currently raining? (Umweltsensor 0x69 channel "00").
 
     Two independent signal sources, combined with OR:
@@ -930,7 +876,6 @@ class DuoFernRainBinarySensor(
     possible stuck-ON state to at most one weather-frame interval.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "rain_detected"
     _attr_device_class = BinarySensorDeviceClass.MOISTURE
     _attr_icon = "mdi:weather-rainy"
@@ -945,7 +890,7 @@ class DuoFernRainBinarySensor(
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_rain_detected"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         # Two independent sources, combined via OR in is_on. Both default to
         # "no rain" rather than "unknown" so the entity shows a sensible
         # state before the first frame of either kind arrives.

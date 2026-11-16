@@ -67,10 +67,8 @@ from homeassistant.components.cover import (
     CoverEntityFeature,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import (
@@ -78,6 +76,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description
 from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
@@ -150,7 +149,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern cover entities", len(entities))
 
 
-class DuoFernCover(CoordinatorEntity[DuoFernCoordinator], CoverEntity):
+class DuoFernCover(DuoFernEntity, CoverEntity):
     """Representation of a DuoFern roller shutter or garage door as a CoverEntity.
 
     Inherits from CoordinatorEntity for automatic state updates when the
@@ -166,7 +165,6 @@ class DuoFernCover(CoordinatorEntity[DuoFernCoordinator], CoverEntity):
     All readings are exposed in extra_state_attributes.
     """
 
-    _attr_has_entity_name = True
     _attr_name = None  # Use device name as entity name
 
     def __init__(
@@ -362,27 +360,17 @@ class DuoFernCover(CoordinatorEntity[DuoFernCoordinator], CoverEntity):
     def device_info(self) -> DeviceInfo:
         """Return device info, including firmware version when available."""
         state = self._device_state
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()

@@ -44,15 +44,14 @@ from homeassistant.components.climate import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,9 +99,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern climate entities", len(entities))
 
 
-class DuoFernClimate(
-    CoordinatorEntity[DuoFernCoordinator], ClimateEntity, RestoreEntity
-):
+class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
     """A DuoFern thermostat or radiator valve as a HA ClimateEntity.
 
     Supports HEAT and OFF modes:
@@ -117,7 +114,6 @@ class DuoFernClimate(
       actTempLimit:1,2,3,4       — active threshold selection
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
     _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
@@ -310,26 +306,16 @@ class DuoFernClimate(
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()

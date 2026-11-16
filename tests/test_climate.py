@@ -538,7 +538,7 @@ def test_climate_handle_coordinator_update_updates_firmware():
     climate.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.climate.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         climate._handle_coordinator_update()
@@ -562,7 +562,7 @@ def test_climate_handle_coordinator_update_skips_when_version_unchanged():
     climate.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.climate.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         climate._handle_coordinator_update()
@@ -580,7 +580,7 @@ def test_climate_handle_coordinator_update_skips_when_no_version():
 
     mock_registry = MagicMock()
     with patch(
-        "custom_components.duofern.climate.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         climate._handle_coordinator_update()

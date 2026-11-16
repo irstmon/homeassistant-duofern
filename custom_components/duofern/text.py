@@ -23,13 +23,12 @@ import re
 from homeassistant.components.text import TextEntity, TextMode
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator
+from .entity import DuoFernEntity, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,14 +53,13 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class DuoFernPairCodeText(CoordinatorEntity[DuoFernCoordinator], TextEntity):
+class DuoFernPairCodeText(DuoFernEntity, TextEntity):
     """Text input for entering a 6-digit hex device code before pair-by-code.
 
     Appears on the stick device card alongside the "Pair by Code" button.
     The button reads the current value of this entity when pressed.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "pair_code_input"
     _attr_icon = "mdi:barcode"
     _attr_entity_category = EntityCategory.CONFIG
@@ -74,7 +72,7 @@ class DuoFernPairCodeText(CoordinatorEntity[DuoFernCoordinator], TextEntity):
         """Initialize the pair code text input."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_pair_code_input"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, system_code_hex)})
+        self._attr_device_info = device_link(system_code_hex)
         self._current_value: str = ""
 
     @property

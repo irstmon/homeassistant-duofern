@@ -43,16 +43,15 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -316,7 +315,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern sensor entities", len(entities))
 
 
-class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+class DuoFernSensor(DuoFernEntity, SensorEntity):
     """A single measurement from a DuoFern weather/environment sensor.
 
     State is updated when the coordinator receives a weather data frame
@@ -328,7 +327,6 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     """
 
     entity_description: DuoFernSensorDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -405,29 +403,19 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -436,7 +424,7 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+class DuoFernStringSensor(DuoFernEntity, SensorEntity):
     """A single string-valued reading (e.g. device date/time).
 
     Identical to DuoFernSensor except native_value returns the raw string
@@ -447,7 +435,6 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     """
 
     entity_description: DuoFernSensorDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -491,14 +478,11 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -511,9 +495,7 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBatterySensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernBatterySensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """A battery level sensor for any DuoFern device that transmits battery data.
 
     Battery data reaches us via two paths:
@@ -528,7 +510,6 @@ class DuoFernBatterySensor(
     HA restart without waiting for the next battery transmission.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "battery"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -616,14 +597,11 @@ class DuoFernBatterySensor(
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -645,9 +623,7 @@ class DuoFernBatterySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernValveSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernValveSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Sensor showing the current valve opening position of the radiator valve.
 
     From 30_DUOFERN.pm format "29" statusId 186:
@@ -660,7 +636,6 @@ class DuoFernValveSensor(
     an HA restart — battery devices can take minutes before their first frame.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "valve_position"
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -676,7 +651,7 @@ class DuoFernValveSensor(
         super().__init__(coordinator)
         self._hex_code = hex_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_valve_position"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: float | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -727,9 +702,7 @@ class DuoFernValveSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernLastSeenSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernLastSeenSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Sensor that shows when the device last sent any signal.
 
     Updated on every status frame, sensor event, weather frame, and battery
@@ -740,7 +713,6 @@ class DuoFernLastSeenSensor(
     the sensor would show 'unknown' until the next frame arrives.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "last_seen"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -806,14 +778,11 @@ class DuoFernLastSeenSensor(
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
 
@@ -822,9 +791,7 @@ class DuoFernLastSeenSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBoostStartSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernBoostStartSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Timestamp sensor: when was the last boost started?
 
     Set in the coordinator when boost transitions from inactive → active
@@ -834,7 +801,6 @@ class DuoFernBoostStartSensor(
     HA renders datetime sensors as relative time: "vor 13 Minuten".
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "boost_started"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:clock-start"
@@ -849,7 +815,7 @@ class DuoFernBoostStartSensor(
         super().__init__(coordinator)
         self._hex_code = hex_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_started"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -899,9 +865,7 @@ class DuoFernBoostStartSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernActiveGrenzwerteSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity
-):
+class DuoFernActiveGrenzwerteSensor(DuoFernEntity, SensorEntity):
     """Reports which of the up to 5 configured Grenzwerte (trigger slots)
     are currently active for one trigger type (Sonne / Wind / Temperatur).
 
@@ -951,8 +915,6 @@ class DuoFernActiveGrenzwerteSensor(
     debug message rather than guessing.
     """
 
-    _attr_has_entity_name = True
-
     def __init__(
         self,
         coordinator: DuoFernCoordinator,
@@ -981,7 +943,7 @@ class DuoFernActiveGrenzwerteSensor(
         # exactly what @geraldeberle1234 saw (English text despite German HA language).
         self._attr_translation_key = translation_key
         self._attr_icon = icon
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._active_slots: set[int] = set()
         # False until the first start/end event with a valid bitmask has been
         # processed since this entity was loaded (see class docstring).

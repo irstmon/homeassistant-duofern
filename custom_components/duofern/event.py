@@ -18,13 +18,12 @@ import logging
 from homeassistant.components.event import EventEntity
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, REMOTE_DEVICE_TYPES
 from . import DuoFernConfigEntry
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator
+from .entity import DuoFernEntity, device_description, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,7 +89,7 @@ async def async_setup_entry(
         async_add_entities(entities)
 
 
-class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
+class DuoFernRemoteEvent(DuoFernEntity, EventEntity):
     """An EventEntity for a DuoFern remote control or wall button.
 
     Fires an HA event with:
@@ -99,7 +98,6 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
         channel: which button group was pressed (e.g. "03" for group 3)
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
     _attr_event_types = _REMOTE_EVENT_TYPES
 
@@ -113,13 +111,10 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_event"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=hex_code,
-            via_device_id=coordinator.stick_device_id,
+        self._attr_device_info = device_description(
+            coordinator,
+            self._device_code,
+            hex_code,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -159,9 +154,7 @@ class DuoFernRemoteEvent(CoordinatorEntity[DuoFernCoordinator], EventEntity):
         )
 
 
-class DuoFernUmweltsensorDawnDuskEvent(
-    CoordinatorEntity[DuoFernCoordinator], EventEntity
-):
+class DuoFernUmweltsensorDawnDuskEvent(DuoFernEntity, EventEntity):
     """EventEntity for Umweltsensor (0x69) dawn/dusk trigger events.
 
     From 30_DUOFERN.pm sensorMsg:
@@ -188,7 +181,6 @@ class DuoFernUmweltsensorDawnDuskEvent(
     dawn/dusk has not been cross-checked against a real captured frame.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "dawn_dusk"
     # Deliberately NO explicit _attr_name — see DuoFernActiveGrenzwerteSensor
     # in sensor.py for why (setting both blocks the translation lookup).
@@ -204,7 +196,7 @@ class DuoFernUmweltsensorDawnDuskEvent(
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_dawn_dusk_event"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to DuoFern events on the HA event bus."""

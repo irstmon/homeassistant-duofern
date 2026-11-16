@@ -946,7 +946,7 @@ def test_binary_sensor_handle_coordinator_update_updates_firmware():
     sensor.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -974,7 +974,7 @@ def test_binary_sensor_handle_coordinator_update_no_update_when_version_unchange
     sensor.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -996,7 +996,7 @@ def test_binary_sensor_handle_coordinator_update_no_version_skips_registry():
     sensor.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -1028,7 +1028,7 @@ def test_window_sensor_handle_coordinator_update_updates_firmware():
     sensor.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -1052,7 +1052,7 @@ def test_window_sensor_handle_coordinator_update_skips_when_no_version():
     mock_registry = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -1083,7 +1083,7 @@ def test_obstacle_sensor_handle_coordinator_update_updates_firmware():
     sensor.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()
@@ -1106,7 +1106,7 @@ def test_obstacle_sensor_handle_coordinator_update_skips_when_no_version():
     mock_registry = MagicMock()
 
     with patch(
-        "custom_components.duofern.binary_sensor.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sensor._handle_coordinator_update()

@@ -571,7 +571,7 @@ def test_cover_handle_coordinator_update_updates_firmware():
     mock_registry.async_get_device_by_identifier.return_value = mock_device
 
     with patch(
-        "custom_components.duofern.cover.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         cover._handle_coordinator_update()
@@ -607,7 +607,7 @@ def test_cover_handle_coordinator_update_skips_when_version_unchanged():
     mock_registry.async_get_device_by_identifier.return_value = mock_device
 
     with patch(
-        "custom_components.duofern.cover.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         cover._handle_coordinator_update()
@@ -637,7 +637,7 @@ def test_cover_handle_coordinator_update_skips_when_no_version():
 
     mock_registry = MagicMock()
     with patch(
-        "custom_components.duofern.cover.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         cover._handle_coordinator_update()

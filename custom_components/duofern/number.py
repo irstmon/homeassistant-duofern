@@ -35,14 +35,13 @@ from homeassistant.components.number import (
 )
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -482,7 +481,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern number entities", len(entities))
 
 
-class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, RestoreEntity):
+class DuoFernNumber(DuoFernEntity, NumberEntity, RestoreEntity):
     """A DuoFern numeric configuration value as a NumberEntity (slider).
 
     The current value is read from device status readings.
@@ -494,7 +493,6 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
     """
 
     entity_description: DuoFernNumberDescription
-    _attr_has_entity_name = True
     _attr_mode = NumberMode.SLIDER
 
     def __init__(
@@ -516,7 +514,7 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
         )
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: float | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -728,12 +726,11 @@ GRENZWERT_NUMBER_DESCRIPTIONS: tuple[DuoFernGrenzwertNumberDescription, ...] = (
 )
 
 
-class DuoFernGrenzwertNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity):
+class DuoFernGrenzwertNumber(DuoFernEntity, NumberEntity):
     """Generic value slider for whichever Grenzwert is currently selected
     in its trigger group (see DuoFernGrenzwertSelector in select.py).
     """
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
@@ -758,7 +755,7 @@ class DuoFernGrenzwertNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity
         self._attr_native_max_value = description.native_max_value
         self._attr_native_step = description.native_step
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:

@@ -29,14 +29,13 @@ from dataclasses import dataclass
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -252,7 +251,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern select entities", len(entities))
 
 
-class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, RestoreEntity):
+class DuoFernSelect(DuoFernEntity, SelectEntity, RestoreEntity):
     """A DuoFern multi-option configuration setting as a SelectEntity.
 
     The current value is read from the device's status readings (as set by
@@ -265,7 +264,6 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, Restore
     """
 
     entity_description: DuoFernSelectDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -280,7 +278,7 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, Restore
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}"
         self._attr_options = list(description.options)
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_option: str | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -346,7 +344,7 @@ class DuoFernSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity, Restore
 # number.py instead — see NOTES.md for the min/max/step source per field.
 
 
-class DuoFernGrenzwertSelector(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
+class DuoFernGrenzwertSelector(DuoFernEntity, SelectEntity):
     """Picks which of the up to 5 Grenzwerte (trigger slots) is currently
     shown/edited by the other entities in this group (Number/Switch).
 
@@ -356,7 +354,6 @@ class DuoFernGrenzwertSelector(CoordinatorEntity[DuoFernCoordinator], SelectEnti
     update this triggers.
     """
 
-    _attr_has_entity_name = True
     _attr_options = ["1", "2", "3", "4", "5"]
     _attr_icon = "mdi:numeric"
     _attr_entity_category = EntityCategory.CONFIG
@@ -377,7 +374,7 @@ class DuoFernGrenzwertSelector(CoordinatorEntity[DuoFernCoordinator], SelectEnti
         # DuoFernActiveGrenzwerteSensor in sensor.py for why (setting both
         # translation_key and name blocks the translation lookup entirely).
         self._attr_translation_key = f"{group}_grenzwert"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -407,9 +404,7 @@ class DuoFernGrenzwertSelector(CoordinatorEntity[DuoFernCoordinator], SelectEnti
         self.async_write_ha_state()
 
 
-class DuoFernSunDirectionAngleSelect(
-    CoordinatorEntity[DuoFernCoordinator], SelectEntity
-):
+class DuoFernSunDirectionAngleSelect(DuoFernEntity, SelectEntity):
     """Sonnenrichtung "Zielrichtung" — confirmed discrete values from Homepilot:
     22.5/45/67.5/90/112.5/135/157.5/180/202.5/225/247.5/270/292.5/315°.
 
@@ -425,7 +420,6 @@ class DuoFernSunDirectionAngleSelect(
     both written together.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "sun_direction_angle"
     # Deliberately NO explicit _attr_name — see DuoFernActiveGrenzwerteSensor
     # in sensor.py for why (setting both translation_key and name blocks
@@ -459,7 +453,7 @@ class DuoFernSunDirectionAngleSelect(
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_sun_direction_angle"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -505,9 +499,7 @@ class DuoFernSunDirectionAngleSelect(
         self.async_write_ha_state()
 
 
-class DuoFernSunDirectionWidthSelect(
-    CoordinatorEntity[DuoFernCoordinator], SelectEntity
-):
+class DuoFernSunDirectionWidthSelect(DuoFernEntity, SelectEntity):
     """Sonnenrichtung "Bereich" — confirmed discrete values from Homepilot: 0/45/90/135/180°.
 
     Reads/writes whichever Grenzwert is currently selected for the "sun"
@@ -516,7 +508,6 @@ class DuoFernSunDirectionWidthSelect(
     since the device encodes them in the same byte.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "sun_direction_width"
     _attr_icon = "mdi:angle-acute"
     _attr_entity_category = EntityCategory.CONFIG
@@ -532,7 +523,7 @@ class DuoFernSunDirectionWidthSelect(
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_sun_direction_width"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -570,10 +561,9 @@ class DuoFernSunDirectionWidthSelect(
         self.async_write_ha_state()
 
 
-class DuoFernSunHeightTargetSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
+class DuoFernSunHeightTargetSelect(DuoFernEntity, SelectEntity):
     """Sonnenhöhe "Zielhöhe" — confirmed discrete values from Homepilot: 13/26/39/52/65/78°."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "sun_height_target"
     _attr_icon = "mdi:angle-acute"
     _attr_entity_category = EntityCategory.CONFIG
@@ -589,7 +579,7 @@ class DuoFernSunHeightTargetSelect(CoordinatorEntity[DuoFernCoordinator], Select
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_sun_height_target"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -627,10 +617,9 @@ class DuoFernSunHeightTargetSelect(CoordinatorEntity[DuoFernCoordinator], Select
         self.async_write_ha_state()
 
 
-class DuoFernSunHeightWidthSelect(CoordinatorEntity[DuoFernCoordinator], SelectEntity):
+class DuoFernSunHeightWidthSelect(DuoFernEntity, SelectEntity):
     """Sonnenhöhe "Bereich" — confirmed discrete values from Homepilot: 0/26/52°."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "sun_height_width"
     _attr_icon = "mdi:angle-acute"
     _attr_entity_category = EntityCategory.CONFIG
@@ -646,7 +635,7 @@ class DuoFernSunHeightWidthSelect(CoordinatorEntity[DuoFernCoordinator], SelectE
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_sun_height_width"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:

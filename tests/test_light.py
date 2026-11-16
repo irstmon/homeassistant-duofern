@@ -257,7 +257,7 @@ def test_light_handle_coordinator_update_updates_firmware():
     light.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.light.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         light._handle_coordinator_update()
@@ -284,7 +284,7 @@ def test_light_handle_coordinator_update_skips_when_version_unchanged():
     light.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.light.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         light._handle_coordinator_update()
@@ -304,7 +304,7 @@ def test_light_handle_coordinator_update_skips_when_no_version():
 
     mock_registry = MagicMock()
     with patch(
-        "custom_components.duofern.light.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         light._handle_coordinator_update()

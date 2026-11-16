@@ -706,7 +706,7 @@ def test_automation_switch_handle_coordinator_update_updates_firmware():
     sw.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.switch.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sw._handle_coordinator_update()
@@ -728,7 +728,7 @@ def test_automation_switch_handle_coordinator_update_skips_when_no_version():
 
     mock_registry = MagicMock()
     with patch(
-        "custom_components.duofern.switch.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sw._handle_coordinator_update()
@@ -759,7 +759,7 @@ def test_switch_handle_coordinator_update_updates_firmware():
     sw.hass = MagicMock()
 
     with patch(
-        "custom_components.duofern.switch.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sw._handle_coordinator_update()
@@ -781,7 +781,7 @@ def test_switch_handle_coordinator_update_skips_when_no_version():
 
     mock_registry = MagicMock()
     with patch(
-        "custom_components.duofern.switch.dr.async_get",
+        "custom_components.duofern.entity.dr.async_get",
         return_value=mock_registry,
     ):
         sw._handle_coordinator_update()
