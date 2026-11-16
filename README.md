@@ -151,7 +151,7 @@ Pair DuoFern devices by entering their **6-digit or 10-digit** device code - **n
 **How to use:**
 
 1. Put the device in pairing mode (within 2 hours of power-on, or set to RemotePair)
-2. Enter the hex code printed on the device in the **"Device Code Input"** text field on the stick device card: 6 digits (e.g. `40AB12`), or all 10 digits for devices built since about 2020 (e.g. `432256F67A`)
+2. Enter the hex code printed on the device in the **"Device Code Input"** text field on the stick device card: 6 digits (e.g. `40AB12`), or all 10 digits for devices built since about 2020 (e.g. `431234ABCD`)
 3. Press the **"Pair by Code"** button
 4. If successful, the device is added automatically and the integration reloads
 

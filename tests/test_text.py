@@ -53,14 +53,14 @@ def test_text_max_length_is_ten():
     [
         ("", True),
         ("406B2D", True),
-        ("432256F67A", True),
-        ("432256f67a", True),
+        ("431234ABCD", True),
+        ("431234abcd", True),
         ("406B2", False),
         ("406B2D1", False),
         ("406B2D12", False),
-        ("432256F67", False),
-        ("432256F67A1", False),
-        ("432256F67Z", False),
+        ("431234ABC", False),
+        ("431234ABCD1", False),
+        ("431234ABCZ", False),
     ],
 )
 def test_text_pattern(value: str, ok: bool):
@@ -72,11 +72,11 @@ def test_text_pattern(value: str, ok: bool):
 
 async def test_text_set_value_stores_ten_digit_code():
     text = _make_text()
-    await text.async_set_value("432256f67a")
-    assert text.native_value == "432256F67A"
+    await text.async_set_value("431234abcd")
+    assert text.native_value == "431234ABCD"
 
 
-@pytest.mark.parametrize("value", ["406B2D12", "432256F67", "432256F67A1"])
+@pytest.mark.parametrize("value", ["406B2D12", "431234ABC", "431234ABCD1"])
 async def test_text_set_value_rejects_other_lengths(value: str):
     text = _make_text()
     await text.async_set_value(value)

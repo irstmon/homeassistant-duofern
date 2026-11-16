@@ -570,7 +570,7 @@
       "fields": {
         "device_code": {
           "name": "Device Code",
-          "description": "6- or 10-digit hex code printed on the device label (e.g. \"40AB12\" or \"432256F67A\")."
+          "description": "6- or 10-digit hex code printed on the device label (e.g. \"40AB12\" or \"431234ABCD\")."
         }
       }
     }
@@ -580,7 +580,7 @@
       "message": "The DuoFern integration is not loaded. Check the integration under Settings > Devices & Services."
     },
     "pair_no_input": {
-      "message": "Please enter a valid 6- or 10-digit hex device code in the \"Device Code Input\" field first (e.g. 40AB12 or 432256F67A)."
+      "message": "Please enter a valid 6- or 10-digit hex device code in the \"Device Code Input\" field first (e.g. 40AB12 or 431234ABCD)."
     },
     "pair_success": {
       "message": "Device {device_code} paired successfully."

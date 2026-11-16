@@ -721,7 +721,7 @@ async def test_pair_by_code_button_passes_ten_digit_code():
 
     mock_hass = MagicMock()
     mock_state = MagicMock()
-    mock_state.state = "432256f67a"  # lowercase - should be uppercased
+    mock_state.state = "431234abcd"  # lowercase - should be uppercased
     mock_hass.states.get.return_value = mock_state
     btn.hass = mock_hass
 
@@ -735,4 +735,4 @@ async def test_pair_by_code_button_passes_ten_digit_code():
 
         await btn.async_press()
 
-    coordinator.async_pair_device_by_code.assert_called_once_with("432256F67A")
+    coordinator.async_pair_device_by_code.assert_called_once_with("431234ABCD")

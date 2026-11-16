@@ -71,6 +71,8 @@ class FakeTransport:
         self.written: list[str] = []
         self.protocol: DuoFernSerialProtocol | None = None
         self.closed = False
+        self.released = False
+        self.close_delay: float | None = 0.0
 
     def write(self, data: bytes) -> None:
         frame = bytes(data).hex().upper()
@@ -85,7 +87,18 @@ class FakeTransport:
             )
 
     def close(self) -> None:
+        # Like the real transports: the port is released a little later and
+        # connection_lost() reports it.
         self.closed = True
+        self.released = False
+
+        def release() -> None:
+            self.released = True
+            if self.protocol is not None:
+                self.protocol.connection_lost(None)
+
+        if self.close_delay is not None:
+            asyncio.get_running_loop().call_later(self.close_delay, release)
 
     def is_closing(self) -> bool:
         return self.closed
@@ -224,3 +237,37 @@ def test_frames_of_the_log_are_well_formed() -> None:
     """Guard for the constants above: all frames are 22 bytes."""
     for frame in [*EXPECTED_TX, *REPLIES.values()]:
         assert len(frame) == 44, frame
+
+
+# ---------------------------------------------------------------------------
+# disconnect() waits until the port is released
+# ---------------------------------------------------------------------------
+
+
+async def test_disconnect_waits_until_the_port_is_released() -> None:
+    """Log of 2026-11-16: the port was closed 24 ms after disconnect() returned.
+
+    The reload opened it again in between and failed with "Could not
+    exclusively lock port /dev/ttyUSB0".
+    """
+    transport = FakeTransport(REPLIES)
+    transport.close_delay = 0.05
+    stick = _make_stick([])
+    with _patch_connection(transport):
+        await stick.connect()
+    await stick.disconnect()
+    assert transport.released
+
+
+async def test_disconnect_gives_up_when_the_port_is_never_released(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = FakeTransport(REPLIES)
+    transport.close_delay = None  # never released
+    stick = _make_stick([])
+    with _patch_connection(transport):
+        await stick.connect()
+    with patch.object(stick_module, "PORT_CLOSE_TIMEOUT", 0.05):
+        await stick.disconnect()
+    assert not transport.released
+    assert "was not released" in caplog.text

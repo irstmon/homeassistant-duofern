@@ -43,6 +43,10 @@ from .serial_connection import create_serial_connection
 
 _LOGGER = logging.getLogger(__name__)
 
+# Seconds disconnect() waits until the operating system has really released
+# the serial port (see DuoFernStick.disconnect).
+PORT_CLOSE_TIMEOUT = 2.0
+
 
 class DuoFernStick:
     """Manages the DuoFern USB stick serial connection.
@@ -155,6 +159,25 @@ class DuoFernStick:
         if self._transport:
             self._transport.close()
             self._transport = None
+            # transport.close() only starts closing: the port is flushed and
+            # closed in the background and connection_lost() is called when
+            # that is done. Home Assistant opens serial ports exclusively
+            # (homeassistant.block_shared_serial), so a reload that opens the
+            # port again before it is released fails with "Could not
+            # exclusively lock port" and is retried 5 s later (seen in the
+            # log of 2026-11-16). Wait for the port to be released.
+            protocol = self._serial_protocol
+            if isinstance(protocol, DuoFernSerialProtocol):
+                try:
+                    await asyncio.wait_for(
+                        protocol.closed.wait(), timeout=PORT_CLOSE_TIMEOUT
+                    )
+                except TimeoutError:
+                    _LOGGER.warning(
+                        "Serial port %s was not released within %.0f s",
+                        self._port,
+                        PORT_CLOSE_TIMEOUT,
+                    )
 
         self._connected = False
         _LOGGER.info("DuoFern stick disconnected")
@@ -469,6 +492,8 @@ class DuoFernSerialProtocol(asyncio.Protocol):
     ) -> None:
         """Initialize the serial protocol handler."""
         self._frame_callback = frame_callback
+        # Set by connection_lost(): the transport has closed the port.
+        self.closed = asyncio.Event()
         self._buffer = bytearray()
         self._flush_handle: asyncio.TimerHandle | None = None
         self._init_response_future: asyncio.Future[bytearray] | None = None
@@ -489,6 +514,7 @@ class DuoFernSerialProtocol(asyncio.Protocol):
             _LOGGER.error("Serial connection lost: %s", exc)
         else:
             _LOGGER.debug("Serial connection closed")
+        self.closed.set()
 
     def data_received(self, data: bytes) -> None:
         """Called when data arrives from the serial port.

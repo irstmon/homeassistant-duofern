@@ -741,13 +741,13 @@ def test_build_remote_pair():
 
 
 def test_build_code_pair_with_password():
-    """10-digit code 432256F67A, frame as sent to the real device 2026-11-16."""
+    """10-digit code 431234ABCD, same layout as the frame sent to a real device on 2026-11-16."""
     f = DuoFernEncoder.build_code_pair(
-        DuoFernId.from_hex("432256"),
+        DuoFernId.from_hex("431234"),
         DuoFernId.from_hex("6F5C7E"),
-        bytes.fromhex("F67A"),
+        bytes.fromhex("ABCD"),
     )
-    assert bytes(f).hex().upper() == "0DFF0601F67A0000000000000000006F5C7E43225601"
+    assert bytes(f).hex().upper() == "0DFF0601ABCD0000000000000000006F5C7E43123401"
 
 
 def test_build_code_pair_without_password_is_unchanged():
@@ -766,11 +766,11 @@ def test_build_code_pair_rejects_wrong_password_length():
     ("code", "ok"),
     [
         ("406B2D", True),
-        ("432256F67A", True),
-        ("432256f67a", True),
+        ("431234ABCD", True),
+        ("431234abcd", True),
         ("406B2D12", False),
-        ("432256F67A12", False),
-        ("432256 67A", False),
+        ("431234ABCD12", False),
+        ("431234 67A", False),
         ("", False),
     ],
 )
@@ -779,8 +779,8 @@ def test_validate_pair_code(code: str, ok: bool):
 
 
 def test_validate_device_code_stays_six_digits():
-    assert validate_device_code("432256")
-    assert not validate_device_code("432256F67A")
+    assert validate_device_code("431234")
+    assert not validate_device_code("431234ABCD")
 
 
 def test_build_code_pair():
