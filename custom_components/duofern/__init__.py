@@ -55,6 +55,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_DEVICE_CODE, CONF_PAIRED_DEVICES, CONF_SERIAL_PORT, DOMAIN
 from .coordinator import DuoFernCoordinator, missing_status_store
+from .entity import device_description
 from .protocol import DuoFernId
 
 _LOGGER = logging.getLogger(__name__)
@@ -244,6 +245,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: DuoFernConfigEntry) -> b
     # migration guidance we read .id straight off the returned DeviceEntry
     # instead of doing a second registry lookup.
     coordinator.stick_device_id = stick_device.id
+
+    # Register every paired device before the entity platforms are set up.
+    # Most entities only refer to their device (device_link); if such an
+    # entity is registered before the main entity of the device has
+    # described it, Home Assistant has no device name yet and derives the
+    # entity id from the config entry title instead. The platforms load
+    # concurrently, so the order is not fixed.
+    for hex_code, device_state in coordinator.data.devices.items():
+        registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            **device_description(coordinator, device_state.device_code, hex_code),
+        )
 
     # Listen for config entry updates (e.g., device list changes via options flow)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))

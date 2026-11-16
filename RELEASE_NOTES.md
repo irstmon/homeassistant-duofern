@@ -1,5 +1,6 @@
 # Release v2.4.0
 
+- **Fixed:** the firmware version on the device page no longer disappears after a restart until the device reports again.
 - **Fixed:** Umweltsensor (`0x69`) weather values and configuration no longer disappear after every status frame of its actor channel.
 - **Fixed:** Wandtaster 6fach 230V (`0x74`): status frames of an unknown format no longer overwrite the relay state with wrong values. Unknown status formats are now ignored for all devices.
 - **Fixed:** Universalaktor (`0x43`) channel 2: automation switches, stairwell time and the dusk/dawn buttons now act on channel 2 instead of channel 1.

@@ -12,8 +12,6 @@ Everything the entity platforms have in common lives here:
 
 from __future__ import annotations
 
-from typing import Any
-
 from homeassistant.core import callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -24,10 +22,6 @@ from .coordinator import DuoFernCoordinator
 from .protocol import DuoFernId
 
 MANUFACTURER = "Rademacher"
-
-# Marker for "do not pass sw_version at all". Passing None would clear a
-# firmware version that is already stored in the device registry.
-_UNSET: Any = object()
 
 
 def device_link(hex_code: str) -> DeviceInfo:
@@ -40,34 +34,44 @@ def device_link(hex_code: str) -> DeviceInfo:
     return DeviceInfo(identifiers={(DOMAIN, hex_code)})
 
 
+def device_name(device_code: DuoFernId, hex_code: str) -> str:
+    """Return the name of a device for the device registry.
+
+    "DuoFern <type> (<6-digit code>)", for a channel of a multi-channel
+    device followed by " Channel <nn>".
+    """
+    name = f"DuoFern {device_code.device_type_name} ({hex_code[:6]})"
+    if len(hex_code) > 6:
+        name += f" Channel {hex_code[6:]}"
+    return name
+
+
 def device_description(
     coordinator: DuoFernCoordinator,
     device_code: DuoFernId,
     hex_code: str,
     *,
-    sw_version: str | None = _UNSET,
-    name: str | None = None,
+    sw_version: str | None = None,
 ) -> DeviceInfo:
     """Return the full description of a DuoFern device.
 
     hex_code is the registry identifier: the 6-digit device code, or the
-    8-digit code with channel for multi-channel devices. The name defaults
-    to "DuoFern <type> (<hex_code>)". sw_version is only included when it
-    is given (None is a valid value: "not known yet").
+    8-digit code with channel for multi-channel devices. The device name
+    shows the channel in words: "DuoFern Universalaktor (43ABCD) Channel 02".
+
+    The firmware version is only included when it is known. Passing None
+    would clear the version stored in the device registry, and it is not
+    known at startup before the device has sent its first status frame.
     """
     info = DeviceInfo(
         identifiers={(DOMAIN, hex_code)},
-        name=(
-            name
-            if name is not None
-            else f"DuoFern {device_code.device_type_name} ({hex_code})"
-        ),
+        name=device_name(device_code, hex_code),
         manufacturer=MANUFACTURER,
         model=device_code.device_type_name,
         serial_number=hex_code,
         via_device_id=coordinator.stick_device_id,
     )
-    if sw_version is not _UNSET:
+    if sw_version:
         info["sw_version"] = sw_version
     return info
 

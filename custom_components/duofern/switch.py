@@ -738,12 +738,6 @@ class DuoFernSwitch(DuoFernEntity, SwitchEntity):
         else:
             self._attr_device_class = SwitchDeviceClass.SWITCH
 
-        self._channel_label = (
-            f" Channel {self._channel}"
-            if self._channel and self._device_code.has_channels
-            else ""
-        )
-
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
         if self.coordinator.data is None:
@@ -804,8 +798,6 @@ class DuoFernSwitch(DuoFernEntity, SwitchEntity):
             self._device_code,
             self._hex_code,
             sw_version=state.status.version if state else None,
-            name=f"DuoFern {self._device_code.device_type_name}"
-            f" ({self._device_code.hex}){self._channel_label}",
         )
 
     @callback
