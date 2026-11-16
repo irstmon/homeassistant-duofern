@@ -9,6 +9,7 @@ from custom_components.duofern.protocol import (
     DuoFernDecoder,
     ParsedStatus,
     validate_device_code,
+    validate_pair_code,
     validate_system_code,
 )
 
@@ -737,6 +738,49 @@ def test_build_remote_pair():
     assert f[2] == 0x06
     assert f[3] == 0x01
     assert f[18:21] == _DEV.raw
+
+
+def test_build_code_pair_with_password():
+    """10-digit code 432256F67A, frame as sent to the real device 2026-11-16."""
+    f = DuoFernEncoder.build_code_pair(
+        DuoFernId.from_hex("432256"),
+        DuoFernId.from_hex("6F5C7E"),
+        bytes.fromhex("F67A"),
+    )
+    assert bytes(f).hex().upper() == "0DFF0601F67A0000000000000000006F5C7E43225601"
+
+
+def test_build_code_pair_without_password_is_unchanged():
+    dev, sys_ = DuoFernId.from_hex("46ABCD"), DuoFernId.from_hex("6FAA01")
+    f = DuoFernEncoder.build_code_pair(dev, sys_)
+    assert bytes(f).hex().upper() == "0DFF060100000000000000000000006FAA0146ABCD01"
+    assert f == DuoFernEncoder.build_code_pair(dev, sys_, None)
+
+
+def test_build_code_pair_rejects_wrong_password_length():
+    with pytest.raises(ValueError):
+        DuoFernEncoder.build_code_pair(_DEV, _SYS, b"\x01")
+
+
+@pytest.mark.parametrize(
+    ("code", "ok"),
+    [
+        ("406B2D", True),
+        ("432256F67A", True),
+        ("432256f67a", True),
+        ("406B2D12", False),
+        ("432256F67A12", False),
+        ("432256 67A", False),
+        ("", False),
+    ],
+)
+def test_validate_pair_code(code: str, ok: bool):
+    assert validate_pair_code(code) is ok
+
+
+def test_validate_device_code_stays_six_digits():
+    assert validate_device_code("432256")
+    assert not validate_device_code("432256F67A")
 
 
 def test_build_code_pair():

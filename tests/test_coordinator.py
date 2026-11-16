@@ -145,14 +145,20 @@ async def test_pair_by_code_rejects_invalid_code(hass: HomeAssistant) -> None:
         await coordinator.async_pair_device_by_code("ZZZZZZ")
 
 
-async def test_pair_by_code_rejects_ten_digit_code(hass: HomeAssistant) -> None:
-    """async_pair_device_by_code raises HomeAssistantError for 10-digit codes."""
+@pytest.mark.parametrize(
+    "code", ["406B2D12", "406B2D123", "406B2D12345", "406B2D12ZZ", "406B2D 234", ""]
+)
+async def test_pair_by_code_rejects_wrong_length(
+    hass: HomeAssistant, code: str
+) -> None:
+    """Only 6 or 10 hex digits are accepted, nothing in between or longer."""
     entry = _make_entry()
     entry.add_to_hass(hass)
     coordinator = _make_coordinator(hass, entry)
 
-    with pytest.raises(HomeAssistantError):
-        await coordinator.async_pair_device_by_code("406B2D1234")  # 10 chars
+    with pytest.raises(HomeAssistantError) as error:
+        await coordinator.async_pair_device_by_code(code)
+    assert error.value.translation_key == "pair_no_input"
 
 
 async def test_pair_by_code_rejects_when_stick_none(hass: HomeAssistant) -> None:

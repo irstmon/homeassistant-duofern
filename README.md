@@ -11,6 +11,8 @@ Communicates directly with the USB stick using the native serial protocol - via 
 
 Forked from @MSchenkl and extensively rewritten to aim for a complete re-implementation based on the FHEM modules `10_DUOFERNSTICK.pm` and `30_DUOFERN.pm`, aiming for near-complete feature parity with the FHEM DuoFern module and the Homepilot / SmartHome Box.
 
+> **New in v2.4.0: Pair by Code now works with 10-digit codes.** Devices built since about 2020 carry a 10-digit code (e.g. `431234ABCD`). Enter all 10 digits in **Pair by Code** and the device is paired without a button press, like a 6-digit device. See [Pair by Code](#pair-by-code-code-pairing).
+
 📋 **[Supported Devices & Features](docs/devices.md)** - full device matrix and per-platform entity reference
 🔧 **[Protocol Reference](docs/protocol.md)** - frame format, init sequence, boost/pairing internals
 
@@ -64,10 +66,10 @@ Enter the 6-digit hex codes of your paired DuoFern devices, separated by commas:
 406B2D, 4090AE, 40B690, 436C1A
 ```
 
-You can find the device codes in your FHEM configuration (`ATTR device CODE`) or on the enclosed labels. If you have (paired) devices with 10 digits, take only the first 6 digits.
+You can find the device codes in your FHEM configuration (`ATTR device CODE`) or on the enclosed labels. A device is always listed with its 6-digit code: if the label shows 10 digits, take only the first 6 digits here. All 10 digits are only needed for [Pair by Code](#pair-by-code-code-pairing).
 
 This field is optional - you can leave it empty and finish setup with zero devices, then add them
-afterwards via **Settings → Devices & Services → DuoFern → Configure**, [physical pairing](#pair-by-set-button-connect-10-digit-covers), or
+afterwards via **Settings → Devices & Services → DuoFern → Configure**, [physical pairing](#pair-by-set-button), or
 [Pair by Code](#pair-by-code-code-pairing). Useful for a from-scratch setup with no FHEM export or
 Homepilot access to read existing codes from - see [I don't have FHEM and can't find my System
 Code anywhere](#i-dont-have-fhem-and-cant-find-my-system-code-anywhere) above.
@@ -144,16 +146,16 @@ These buttons appear on the **DuoFern Stick device card**:
 
 ### Pair by Code (Code-Pairing)
 
-Pair DuoFern devices by entering their 6-digit device code - **no physical button press required**. This replicates the Rademacher Homepilot "Code anmelden" functionality.
+Pair DuoFern devices by entering their **6-digit or 10-digit** device code - **no physical button press required**. This replicates the Rademacher Homepilot "Code anmelden" functionality.
 
 **How to use:**
 
 1. Put the device in pairing mode (within 2 hours of power-on, or set to RemotePair)
-2. Enter the 6-digit hex code (printed on the device) in the **"Pair by Code"** text field on the stick device card
+2. Enter the hex code printed on the device in the **"Device Code Input"** text field on the stick device card: 6 digits (e.g. `40AB12`), or all 10 digits for devices built since about 2020 (e.g. `432256F67A`)
 3. Press the **"Pair by Code"** button
 4. If successful, the device is added automatically and the integration reloads
 
-Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired using button press method.
+**10-digit codes:** the first 6 digits are the device code, the last 4 digits are a pairing password that is only sent with the pairing request. After pairing the device is listed with its 6-digit code everywhere (device list, device names, entities). The 10-digit form is accepted for Pair by Code only.
 
 **Action `duofern.pair_device_by_code`**
 
@@ -167,11 +169,11 @@ data:
 
 | Field | Required | Description |
 |---|---|---|
-| `device_code` | yes | 6-digit hex code of the device to pair. Lower case is accepted. |
+| `device_code` | yes | 6-digit or 10-digit hex code of the device to pair. Lower case is accepted. |
 
-On success the action returns `device_code` and `result: paired`, the device is added to the device list and the integration reloads. The action raises an error if the integration is not loaded, if the device does not acknowledge the pairing request, if it rejects it, or if no answer arrives in time.
+On success the action returns `device_code` (always the 6-digit device code) and `result: paired`, the device is added to the device list and the integration reloads. The action raises an error if the integration is not loaded, if the device does not acknowledge the pairing request, if it rejects it, or if no answer arrives in time.
 
-### Pair by set button (connect 10-digit covers)
+### Pair by set button
 
 1. Press the physical **set button** on the motor
 2. Press the **"Start pairing"** button  on the **DuoFern Stick device card**
@@ -188,7 +190,7 @@ On success the action returns `device_code` and `result: paired`, the device is 
 - **Automatic device discovery** *(opt-in)* - unknown devices that send frames but are not yet in your paired list automatically appear in the HA Discovered inbox. Enable under **Settings → Devices & Services → DuoFern → Configure**. See [Automatic Device Discovery](#automatic-device-discovery) above
 - **Auto-add on pairing** - when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
 - **Auto-remove on unpairing** - when a device is unpaired during an active unpairing window, it is automatically removed from the config and the integration reloads
-- **Pair by Code** - pair devices by entering their 6-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
+- **Pair by Code** - pair devices by entering their 6-digit or 10-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
 
 See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control Event Entities](docs/devices.md#remote-control-event-entities) in the devices reference for the full per-device button and event-entity list.
 

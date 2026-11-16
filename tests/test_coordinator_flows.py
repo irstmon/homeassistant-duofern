@@ -645,6 +645,61 @@ def test_coordinator_exposes_what_the_tests_rely_on() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Pair by code with a 10-digit code
+# ---------------------------------------------------------------------------
+
+
+async def test_pair_by_code_with_ten_digit_code(hass: HomeAssistant) -> None:
+    """Code 432256F67A: password in the frame, the device stays 6-digit.
+
+    Frames from the test with a real device on 2026-11-16: USB frame
+    0DFF0601F67A...6F5C7E43225601, answer 0602 02 ... 432256.
+    """
+    async with fake_stick():
+        entry = make_entry(hass, ["40A1B2"])
+        coordinator = await setup_entry(hass, entry)
+        stick = FakeStick.instances[-1]
+        sent: list[str] = []
+        system = coordinator.system_code.hex
+
+        async def send(frame: bytearray) -> None:
+            sent.append(bytes(frame).hex().upper())
+            # the device answers once, as in the test with the real device
+            if frame[0] == 0x0D and frame[2] == 0x06 and not answered:
+                answered.append(True)
+                answer = bytearray.fromhex(
+                    "06020200000000000000000000000043225600000000"
+                )
+                hass.loop.call_soon(coordinator._on_message, answer)
+
+        answered: list[bool] = []
+        stick.send_command = send  # type: ignore[method-assign]
+        with patch("custom_components.duofern.coordinator.REMOTE_PAIR_TIMEOUT", 0.5):
+            result = await hass.services.async_call(
+                DOMAIN,
+                "pair_device_by_code",
+                {"device_code": "432256f67a"},
+                blocking=True,
+                return_response=True,
+            )
+        assert result == {"device_code": "432256", "result": "paired"}
+        pair_frames = [f for f in sent if f.startswith("0DFF0601")]
+        assert pair_frames == [f"0DFF0601F67A000000000000000000{system}43225601"] * 2
+        # SetPairs addresses the 6-digit code
+        assert sent[0][:2] == "03" and "432256" in sent[0] and "F67A" not in sent[0]
+        assert sent[-1][:2] == "05"
+        await hass.async_block_till_done()
+        assert entry.data[CONF_PAIRED_DEVICES] == ["40A1B2", "432256"]
+        # Universalaktor: two channel devices, no trace of the password
+        assert sorted(entry.runtime_data.data.devices) == [
+            "40A1B2",
+            "43225601",
+            "43225602",
+        ]
+        await unload_entry(hass, entry)
+
+
+# ---------------------------------------------------------------------------
 # Pair by code: the three ways it can fail
 # ---------------------------------------------------------------------------
 

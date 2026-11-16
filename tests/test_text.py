@@ -42,10 +42,45 @@ def test_text_initial_value_empty():
     assert text.native_value == ""
 
 
-def test_text_max_length_is_six():
-    """Only 6-digit device codes are accepted."""
+def test_text_max_length_is_ten():
+    """6-digit codes and 10-digit codes (code + pairing password) fit."""
     text = _make_text()
-    assert text._attr_native_max == 6
+    assert text._attr_native_max == 10
+
+
+@pytest.mark.parametrize(
+    ("value", "ok"),
+    [
+        ("", True),
+        ("406B2D", True),
+        ("432256F67A", True),
+        ("432256f67a", True),
+        ("406B2", False),
+        ("406B2D1", False),
+        ("406B2D12", False),
+        ("432256F67", False),
+        ("432256F67A1", False),
+        ("432256F67Z", False),
+    ],
+)
+def test_text_pattern(value: str, ok: bool):
+    """The frontend pattern: empty, 6 or 10 hex digits."""
+    import re
+
+    assert (re.match(_make_text()._attr_pattern, value) is not None) is ok
+
+
+async def test_text_set_value_stores_ten_digit_code():
+    text = _make_text()
+    await text.async_set_value("432256f67a")
+    assert text.native_value == "432256F67A"
+
+
+@pytest.mark.parametrize("value", ["406B2D12", "432256F67", "432256F67A1"])
+async def test_text_set_value_rejects_other_lengths(value: str):
+    text = _make_text()
+    await text.async_set_value(value)
+    assert text.native_value == ""
 
 
 async def test_text_set_value_stores_code():

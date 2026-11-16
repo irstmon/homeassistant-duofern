@@ -816,6 +816,7 @@ class DuoFernEncoder:
     def build_code_pair(
         device_code: DuoFernId,
         system_code: DuoFernId,
+        password: bytes | None = None,
     ) -> bytearray:
         """Code-pairing frame — pair device by code without button press.
 
@@ -830,12 +831,25 @@ class DuoFernEncoder:
 
         Must be sent AFTER StartPair (0x04) to put stick in pairing mode,
         and the frame must be sent TWICE (HP sends with counter 03 then 02).
+
+        10-digit codes (devices since about 2020), OTA-verified 2026-11-16:
+        the last 4 digits of the code are a 2-byte password that travels in
+        clear text in f[4:6] (OTA: the two bytes after 0601). Nonce, repeat
+        counter and the trailing checksum of the radio frame are generated
+        by the stick. Without a password the frame is unchanged (0000).
+          USB: 0D FF 06 01 pw pw 00 00 00 00 00 00 00 00 00 sys dev 01
+          e.g. code 431234ABCD -> device 431234, password ABCD; the device
+          answered with 0602 (pair response).
         """
         f = DuoFernEncoder._frame()
         f[0] = 0x0D
         f[1] = 0xFF
         f[2] = 0x06
         f[3] = 0x01
+        if password is not None:
+            if len(password) != 2:
+                raise ValueError("pairing password must be 2 bytes")
+            f[4:6] = password
         f[15:18] = system_code.raw
         f[18:21] = device_code.raw
         f[21] = 0x01
@@ -1615,9 +1629,19 @@ def validate_system_code(code: str) -> bool:
 def validate_device_code(code: str) -> bool:
     """Validate device code: exactly 6 hex characters.
 
-    10-digit (2020+) codes are deliberately rejected — the MAC key required
-    for the pairing handshake is unknown. Use Auto-Discovery for 10-digit
-    devices that were paired via Homepilot.
+    A device is always identified by its 6-digit code. The 10-digit code
+    printed on devices since about 2020 is this code plus 4 digits that are
+    only needed for pairing by code (see validate_pair_code).
     """
     # bytes.fromhex() alone is not enough, it skips whitespace ("40  12").
     return re.fullmatch(r"[0-9A-Fa-f]{6}", code) is not None
+
+
+def validate_pair_code(code: str) -> bool:
+    """Validate a code for pairing by code: 6 or 10 hex characters.
+
+    6 digits: the device code. 10 digits: the device code followed by the
+    4-digit pairing password (DuoFernEncoder.build_code_pair). Only pairing
+    by code accepts the 10-digit form.
+    """
+    return re.fullmatch(r"[0-9A-Fa-f]{6}([0-9A-Fa-f]{4})?", code) is not None

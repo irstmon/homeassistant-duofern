@@ -133,7 +133,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         # Raises HomeAssistantError (pair_aa / pair_bb / pair_timeout /
         # pair_no_input) on failure and returns None on success.
         await loaded[0].runtime_data.async_pair_device_by_code(device_code)
-        return {"device_code": device_code, "result": "paired"}
+        # The device is known by its 6-digit code, also when it was paired
+        # with a 10-digit code.
+        return {"device_code": device_code[:6], "result": "paired"}
 
     hass.services.async_register(
         DOMAIN,

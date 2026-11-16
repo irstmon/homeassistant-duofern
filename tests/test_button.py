@@ -712,3 +712,27 @@ async def test_pair_by_code_button_calls_coordinator_with_valid_code():
         await btn.async_press()
 
     coordinator.async_pair_device_by_code.assert_called_once_with("AB12CD")
+
+
+async def test_pair_by_code_button_passes_ten_digit_code():
+    """Calls async_pair_device_by_code with the full 10-digit code (code + pairing password)."""
+    coordinator = _make_coordinator()
+    btn = DuoFernPairByCodeButton(coordinator, MOCK_SYSTEM_CODE)
+
+    mock_hass = MagicMock()
+    mock_state = MagicMock()
+    mock_state.state = "432256f67a"  # lowercase - should be uppercased
+    mock_hass.states.get.return_value = mock_state
+    btn.hass = mock_hass
+
+    entity_id = "text.duofern_pair_code"
+    with patch(
+        "custom_components.duofern.button.er.async_get"
+    ) as mock_er:
+        mock_reg = MagicMock()
+        mock_reg.async_get_entity_id.return_value = entity_id
+        mock_er.return_value = mock_reg
+
+        await btn.async_press()
+
+    coordinator.async_pair_device_by_code.assert_called_once_with("432256F67A")

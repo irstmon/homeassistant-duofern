@@ -20,7 +20,7 @@
           "paired_devices": "Gerätecodes"
         },
         "data_description": {
-          "paired_devices": "Kommagetrennte Liste von 6-stelligen Hex-Gerätecodes (z. B. 406B0D, 4090EA, 40B689). Dies sind die Codes Ihrer DuoFern-Geräte."
+          "paired_devices": "Kommagetrennte Liste von 6-stelligen Hex-Gerätecodes (z. B. 406B0D, 4090EA, 40B689). Dies sind die Codes Ihrer DuoFern-Geräte. Von einem 10-stelligen Code hier nur die ersten 6 Stellen eingeben; alle 10 Stellen werden nur für \"Gerät per Code anmelden\" gebraucht."
         }
       },
       "confirm_discovery": {
@@ -61,7 +61,7 @@
           "auto_discover": "Unbekannte Geräte automatisch entdecken"
         },
         "data_description": {
-          "paired_devices": "Kommagetrennte Liste von 6-stelligen Hex-Gerätecodes (z. B. 406B0D, 4090EA, 40B689). Dies sind die Codes Ihrer DuoFern-Geräte.",
+          "paired_devices": "Kommagetrennte Liste von 6-stelligen Hex-Gerätecodes (z. B. 406B0D, 4090EA, 40B689). Dies sind die Codes Ihrer DuoFern-Geräte. Von einem 10-stelligen Code hier nur die ersten 6 Stellen eingeben; alle 10 Stellen werden nur für \"Gerät per Code anmelden\" gebraucht.",
           "auto_discover": "Wenn aktiviert, erscheinen DuoFern-Geräte die Frames senden aber noch nicht in der Geräteliste sind im HA-Eingang."
         }
       }
@@ -566,11 +566,11 @@
   "services": {
     "pair_device_by_code": {
       "name": "Gerät per Code anmelden",
-      "description": "Meldet ein DuoFern-Gerät anhand seines 6-stelligen Hex-Codes an, ohne die Taste am Stick drücken zu müssen. Das Gerät muss sich im Anmeldemodus befinden. 10-stellige Codes (2020+) werden nicht unterstützt — diese zuerst über Homepilot anmelden.",
+      "description": "Meldet ein DuoFern-Gerät anhand seines 6- oder 10-stelligen Hex-Codes an, ohne die Taste am Stick drücken zu müssen. Das Gerät muss sich im Anmeldemodus befinden. Bei Geräten mit 10-stelligem Code (seit etwa 2020) alle 10 Stellen eingeben.",
       "fields": {
         "device_code": {
           "name": "Gerätecode",
-          "description": "6-stelliger Hex-Code auf dem Geräteetikett (z. B. \"40AB12\")."
+          "description": "6- oder 10-stelliger Hex-Code auf dem Geräteetikett (z. B. \"40AB12\" oder \"432256F67A\")."
         }
       }
     }
@@ -580,7 +580,7 @@
       "message": "Die DuoFern-Integration ist nicht geladen. Prüfe die Integration unter Einstellungen > Geräte & Dienste."
     },
     "pair_no_input": {
-      "message": "Bitte zuerst einen gültigen 6-stelligen Hex-Gerätecode im Feld \"Gerätecode-Eingabe\" eingeben (z. B. 40AB12)."
+      "message": "Bitte zuerst einen gültigen 6- oder 10-stelligen Hex-Gerätecode im Feld \"Gerätecode-Eingabe\" eingeben (z. B. 40AB12 oder 432256F67A)."
     },
     "pair_success": {
       "message": "Gerät {device_code} erfolgreich angemeldet."

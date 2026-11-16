@@ -1,7 +1,7 @@
 """Text platform for DuoFern.
 
 Provides a text input entity on the stick device card for entering a
-6-digit hex device code before triggering pair-by-code.
+6- or 10-digit hex device code before triggering pair-by-code.
 
 The text entity is read by DuoFernPairByCodeButton in button.py when
 the user presses the "Pair by Code" button.
@@ -18,7 +18,6 @@ GUI" section for the underlying data model.
 from __future__ import annotations
 
 import logging
-import re
 
 from homeassistant.components.text import TextEntity, TextMode
 from homeassistant.const import EntityCategory
@@ -29,11 +28,13 @@ from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator
 from .entity import DuoFernEntity, device_link
+from .protocol import validate_pair_code
 
 _LOGGER = logging.getLogger(__name__)
 
-# Pattern: exactly 6 hex characters (case-insensitive)
-DEVICE_CODE_PATTERN = r"^([0-9A-Fa-f]{6})?$"  # empty or exactly 6 hex chars
+# Pattern: empty, or 6 or 10 hex characters (case-insensitive). 10 digits =
+# 6-digit device code + 4-digit pairing password (devices since about 2020).
+DEVICE_CODE_PATTERN = r"^([0-9A-Fa-f]{6}([0-9A-Fa-f]{4})?)?$"
 
 
 async def async_setup_entry(
@@ -54,7 +55,7 @@ async def async_setup_entry(
 
 
 class DuoFernPairCodeText(DuoFernEntity, TextEntity):
-    """Text input for entering a 6-digit hex device code before pair-by-code.
+    """Text input for the 6- or 10-digit hex device code for pair-by-code.
 
     Appears on the stick device card alongside the "Pair by Code" button.
     The button reads the current value of this entity when pressed.
@@ -65,7 +66,7 @@ class DuoFernPairCodeText(DuoFernEntity, TextEntity):
     _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = TextMode.TEXT
     _attr_native_min = 0  # empty string allowed as initial state
-    _attr_native_max = 6
+    _attr_native_max = 10
     _attr_pattern = DEVICE_CODE_PATTERN
 
     def __init__(self, coordinator: DuoFernCoordinator, system_code_hex: str) -> None:
@@ -88,9 +89,9 @@ class DuoFernPairCodeText(DuoFernEntity, TextEntity):
         """
         value = value.upper().strip()
         # An empty value clears the field (allowed by DEVICE_CODE_PATTERN).
-        if value and not re.match(r"^[0-9A-Fa-f]{6}$", value):
+        if value and not validate_pair_code(value):
             _LOGGER.warning(
-                "Invalid device code entered: %r — must be exactly 6 hex characters",
+                "Invalid device code entered: %r - must be 6 or 10 hex characters",
                 value,
             )
             return

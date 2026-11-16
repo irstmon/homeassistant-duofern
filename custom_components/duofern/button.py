@@ -41,7 +41,7 @@ from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator
 from .entity import DuoFernEntity, device_link
-from .protocol import DuoFernId
+from .protocol import DuoFernId, validate_pair_code
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -778,11 +778,8 @@ class DuoFernPairByCodeButton(DuoFernEntity, ButtonEntity):
             if state:
                 device_code = state.state.strip().upper()
 
-        if (
-            not device_code
-            or len(device_code) != 6
-            or not all(c in "0123456789ABCDEF" for c in device_code)
-        ):
+        # 6 digits, or 10 digits for devices with a pairing password.
+        if not validate_pair_code(device_code):
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="pair_no_input",

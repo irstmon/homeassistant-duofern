@@ -1,5 +1,6 @@
 # Release v2.4.0
 
+- **New: Pair by Code now works with 10-digit device codes (devices since about 2020).** Enter all 10 digits in "Device Code Input" and press "Pair by Code" - no button press on the device needed. 6-digit codes work as before.
 - **Fixed:** the firmware version on the device page no longer disappears after a restart until the device reports again.
 - **Fixed:** Umweltsensor (`0x69`) weather values and configuration no longer disappear after every status frame of its actor channel.
 - **Fixed:** Wandtaster 6fach 230V (`0x74`): status frames of an unknown format no longer overwrite the relay state with wrong values. Unknown status formats are now ignored for all devices.

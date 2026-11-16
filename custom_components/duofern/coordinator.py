@@ -81,6 +81,7 @@ from .protocol import (
     ParsedStatus,
     SwitchCommand,
     validate_device_code,
+    validate_pair_code,
 )
 from .stick import DuoFernStick
 
@@ -1867,10 +1868,14 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         self.async_set_updated_data(self.data)
 
     async def async_pair_device_by_code(self, device_code_hex: str) -> None:
-        """Pair a 6-digit device by sending a remotePair frame directly.
+        """Pair a device by its 6- or 10-digit code, without a button press.
+
+        A 10-digit code is the 6-digit device code followed by a 4-digit
+        pairing password. The password is only put into the code-pair frame;
+        the device is addressed, stored and shown with its 6-digit code.
 
         Protocol sequence (OTA-verified against Homepilot):
-          1. Validate: only 6-digit codes accepted (10-digit MAC key unknown).
+          1. Validate: 6 or 10 hex digits.
           2. Pre-register device in stick SetPairs table (0x03).
           3. Enter pairing mode (0x04 StartPair) — sets pay[0]=01 on radio.
           4. Send remotePair frame twice (0x0D with f[21]=0x01).
@@ -1886,19 +1891,18 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
         Returns None on success (integration reload is scheduled).
         """
 
-        device_code_hex = device_code_hex.upper().strip()
+        pair_code = device_code_hex.upper().strip()
 
-        if len(device_code_hex) == 10:
+        if not validate_pair_code(pair_code):
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="pair_no_input",
             )
 
-        if not validate_device_code(device_code_hex):
-            raise HomeAssistantError(
-                translation_domain=DOMAIN,
-                translation_key="pair_no_input",
-            )
+        # From here on device_code_hex is the 6-digit device code. The last
+        # 4 digits of a 10-digit code are only used for the pair frame.
+        device_code_hex = pair_code[:6]
+        password = bytes.fromhex(pair_code[6:]) if len(pair_code) == 10 else None
 
         if self._stick is None:
             raise HomeAssistantError(
@@ -1940,7 +1944,7 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                 # Homepilot sends 2x with decrementing OTA counter (03, 02).
                 # The stick auto-decrements the counter per frame.
                 pair_frame = DuoFernEncoder.build_code_pair(
-                    device_code, self._system_code
+                    device_code, self._system_code, password
                 )
                 await self._stick.send_command(pair_frame)
                 await self._stick.send_command(pair_frame)
