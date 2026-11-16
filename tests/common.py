@@ -81,8 +81,9 @@ async def fake_stick(
     stick_class: type[FakeStick] = FakeStick,
     startup_status_timeout: float = 36000,
     status_timeout: float = 36000,
+    startup_status_request_gap: float = 0,
 ) -> AsyncGenerator[type[FakeStick]]:
-    """Patch the stick and the two poll timeouts for the duration of a test."""
+    """Patch the stick and the poll timings for the duration of a test."""
     FakeStick.instances.clear()
     with (
         patch.object(coordinator_module, "DuoFernStick", stick_class),
@@ -90,6 +91,11 @@ async def fake_stick(
             coordinator_module, "STARTUP_STATUS_TIMEOUT", startup_status_timeout
         ),
         patch.object(coordinator_module, "STATUS_TIMEOUT", status_timeout),
+        patch.object(
+            coordinator_module,
+            "STARTUP_STATUS_REQUEST_GAP",
+            startup_status_request_gap,
+        ),
     ):
         yield stick_class
 

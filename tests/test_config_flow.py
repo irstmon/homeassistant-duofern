@@ -688,23 +688,49 @@ async def test_reconfigure_other_port_without_stick_then_recovers(
     assert mock_config_entry.data[CONF_SERIAL_PORT] == OTHER_PORT
 
 
-async def test_reconfigure_port_in_use_is_not_probed(
+async def test_reconfigure_port_in_use_is_not_checked(
     hass: HomeAssistant, mock_config_entry: MockConfigEntry
 ) -> None:
-    """The port of the loaded integration is in operation and must not get an init frame."""
+    """Keeping the port of the loaded integration works without any check.
+
+    Home Assistant opens serial ports exclusively, so opening the port a
+    second time fails while the integration holds it (seen on a real system:
+    "Could not exclusively lock port /dev/ttyUSB0"). The check is simulated
+    as failing here; the dialog must close anyway and the entry reloads.
+    """
     mock_config_entry.add_to_hass(hass)
     mock_config_entry.mock_state(hass, ConfigEntryState.LOADED)
     result = await mock_config_entry.start_reconfigure_flow(hass)
     with (
-        patch(CHECK, return_value=True),
+        patch(CHECK, return_value=False) as check,
         patch(PROBE, return_value=False) as probe,
-        patch.object(hass.config_entries, "async_schedule_reload"),
+        patch.object(hass.config_entries, "async_schedule_reload") as reload,
     ):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_SERIAL_PORT: MOCK_PORT}
         )
+    check.assert_not_called()
     probe.assert_not_called()
+    assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
+    reload.assert_called_once_with(mock_config_entry.entry_id)
+
+
+async def test_reconfigure_other_port_is_checked_while_loaded(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry
+) -> None:
+    """A different port is opened and probed also while the integration runs."""
+    mock_config_entry.add_to_hass(hass)
+    mock_config_entry.mock_state(hass, ConfigEntryState.LOADED)
+    result = await mock_config_entry.start_reconfigure_flow(hass)
+    with patch(CHECK, return_value=False) as check, patch(PROBE) as probe:
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_SERIAL_PORT: OTHER_PORT}
+        )
+    check.assert_called_once_with(OTHER_PORT)
+    probe.assert_not_called()
+    assert result["errors"] == {CONF_SERIAL_PORT: "cannot_connect"}
+    assert mock_config_entry.data[CONF_SERIAL_PORT] == MOCK_PORT
 
 
 async def test_reconfigure_same_port_is_probed_when_not_loaded(

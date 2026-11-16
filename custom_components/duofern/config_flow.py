@@ -178,20 +178,24 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             serial_port = user_input[CONF_SERIAL_PORT].strip()
 
+            # The port the loaded integration is using right now is not
+            # checked at all. Home Assistant opens serial ports exclusively
+            # (homeassistant.block_shared_serial), so a second open of that
+            # port fails although it works; and its stick is initialised and
+            # in operation, an init frame from a second connection would
+            # disturb it.
+            port_in_use = (
+                entry.state is ConfigEntryState.LOADED
+                and serial_port == entry.data.get(CONF_SERIAL_PORT)
+            )
             try:
-                port_valid = await self.hass.async_add_executor_job(
+                if port_in_use:
+                    pass
+                elif not await self.hass.async_add_executor_job(
                     check_serial_connection, serial_port
-                )
-                if not port_valid:
+                ):
                     errors[CONF_SERIAL_PORT] = "cannot_connect"
-                # Ask the stick itself only on a port that is not the one
-                # the loaded integration is using right now: that stick is
-                # initialised and in operation, an init frame from a second
-                # connection would disturb it.
-                elif not (
-                    entry.state is ConfigEntryState.LOADED
-                    and serial_port == entry.data.get(CONF_SERIAL_PORT)
-                ) and not await self.hass.async_add_executor_job(
+                elif not await self.hass.async_add_executor_job(
                     is_duofern_stick, serial_port
                 ):
                     errors[CONF_SERIAL_PORT] = "not_a_duofern_stick"

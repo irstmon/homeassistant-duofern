@@ -61,6 +61,11 @@ STATUS_RETRY_COUNT: Final = 4  # retries after ACK 810003CC (from FHEM)
 # directly after 30 s and once more after another 30 s.
 STARTUP_STATUS_TIMEOUT: Final = 30.0
 STARTUP_STATUS_RETRY_COUNT: Final = 2
+# Pause between the status requests of one startup poll round. The devices
+# answer 0.2-0.3 s after the stick has accepted the request; with the requests
+# sent back to back (one every 80 ms) a reachable device was repeatedly not
+# heard (log of 2026-11-16). FHEM sends them without a pause.
+STARTUP_STATUS_REQUEST_GAP: Final = 1.0
 STARTUP_STATUS_POLL_TYPES: Final[frozenset[int]] = frozenset(
     {
         0x40,

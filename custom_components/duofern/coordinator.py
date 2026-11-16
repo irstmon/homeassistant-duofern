@@ -67,6 +67,7 @@ from .const import (
     DOMAIN,
     REMOTE_PAIR_TIMEOUT,
     STARTUP_STATUS_POLL_TYPES,
+    STARTUP_STATUS_REQUEST_GAP,
     STARTUP_STATUS_RETRY_COUNT,
     STARTUP_STATUS_TIMEOUT,
     STATUS_RETRY_COUNT,
@@ -1493,9 +1494,19 @@ class DuoFernCoordinator(DataUpdateCoordinator[DuoFernData]):
                     STARTUP_STATUS_RETRY_COUNT,
                     missing,
                 )
+                first = True
                 for hex_code in missing:
-                    if hex_code in self._startup_status_pending:
-                        await self._send_status_request(DuoFernId.from_hex(hex_code))
+                    # A device may have answered while the others were asked.
+                    if hex_code not in self._startup_status_pending:
+                        continue
+                    # One request at a time: the answer to a request was
+                    # lost when the next request followed immediately.
+                    if not first:
+                        await asyncio.sleep(STARTUP_STATUS_REQUEST_GAP)
+                        if hex_code not in self._startup_status_pending:
+                            continue
+                    first = False
+                    await self._send_status_request(DuoFernId.from_hex(hex_code))
             # Leave time for the replies to the last request before the
             # pending set is cleared (it suppresses the AA poll loop).
             await asyncio.sleep(STARTUP_STATUS_TIMEOUT)

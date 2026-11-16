@@ -435,6 +435,35 @@ async def test_startup_poll_skips_devices_that_already_answered(
         await unload_entry(hass, entry)
 
 
+async def test_startup_poll_asks_one_device_at_a_time(hass: HomeAssistant) -> None:
+    """The requests of one round are spaced; an answer in between is honoured.
+
+    Log of 2026-11-16: five requests within 357 ms, only the device asked
+    last answered; a reachable device stayed silent in both rounds and
+    answered a single request 0.2 s later.
+    """
+
+    class Timestamps(FakeStick):
+        async def send_command(self, frame: bytearray) -> None:
+            await super().send_command(frame)
+            self.times = [*getattr(self, "times", []), time.monotonic()]
+
+    async with fake_stick(
+        Timestamps, startup_status_timeout=0.2, startup_status_request_gap=0.15
+    ):
+        entry = make_entry(hass, ["42D4BC", "46044B", "46087F"])
+        coordinator = await setup_entry(hass, entry)
+        stick = FakeStick.instances[-1]
+        await _wait_until(lambda: len(_polled(stick)) == 1)
+        assert _polled(stick) == ["42D4BC"]
+        # 46044B answers while it waits for its turn: it is not asked
+        feed(coordinator, SWITCH_46044B)
+        await _wait_until(lambda: len(_polled(stick)) == 2)
+        assert _polled(stick) == ["42D4BC", "46087F"]
+        assert stick.times[1] - stick.times[0] >= 0.25  # two gaps
+        await unload_entry(hass, entry)
+
+
 async def test_silent_devices_become_unavailable_and_are_remembered(
     hass: HomeAssistant, hass_storage: dict
 ) -> None:
