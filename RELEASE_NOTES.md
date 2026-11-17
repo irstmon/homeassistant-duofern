@@ -34,3 +34,4 @@
 - **Changed:** startup: the second status broadcast after 15 s is replaced by a direct status request to devices that have not reported after 30 s and 60 s. A device that still has not answered about 90 s after startup is shown as unavailable until it reports again, also across restarts.
 - **Changed:** SX5 (`0x4E`) no longer has dusk / dawn / toggle buttons (the device has no such commands).
 - **Changed:** Umweltsensor "active Grenzwerte" sensors start as "unknown" after a restart until the first event arrives, instead of showing a possibly outdated list.
+- **Changed:** the Bewegungsmelder (`0x65`) no longer gets a Battery entity - it is mains powered, the entity always stayed empty.

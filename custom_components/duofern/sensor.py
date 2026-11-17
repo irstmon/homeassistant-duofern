@@ -242,28 +242,23 @@ async def async_setup_entry(
                     hex_code,
                 )
 
-        # Battery sensor: created for every device type that is known to transmit
-        # battery data — either via dedicated 0FFF1323 battery frames (binary
-        # sensors 0xAB/0xAC/0x65) or embedded in regular status frames (0xE1
-        # format 29 batteryPercent, 0x73 Raumthermostat).
-        # Also created dynamically for any device that already has battery data
-        # stored (handles unknown future device types that happen to send it).
-        #
+        # Battery sensor: only for the device types that are known to report a
+        # battery level:
+        #   0xAB Rauchmelder and 0xAC Fenster-Tuer-Kontakt send dedicated
+        #   0FFF1323 battery frames (0xAC: seen in a real RX log; 0xAB: the
+        #   radio module reports its battery level once a day per Rademacher).
+        #   0xE1 Heizkoerperantrieb embeds batteryPercent in every format-29
+        #   status frame (statusId 185).
+        # FHEM has no type list: it stores batteryState/batteryPercent from a
+        # 0FFF1323 frame of any device as readings. The coordinator does the
+        # same (_handle_battery_status), so a battery frame from any other
+        # type is still stored and shown as battery_level/battery_state
+        # attribute by the cover, switch, climate, binary_sensor and sensor
+        # entities of that device, but no dedicated battery sensor is created.
+        # 0x65 Bewegungsmelder is mains powered (230 V) and gets none.
         # The entity uses RestoreEntity so the last known value survives a
         # restart without waiting for the next battery transmission.
-        # Statically known battery senders:
-        #   is_binary_sensor (0xAB/0xAC/0x65) always send 0FFF1323 battery frames.
-        #   0xE1 Heizkörperantrieb embeds batteryPercent in every format-29 status frame.
-        # 0x73 Raumthermostat is NOT included — it exists in both battery-powered and
-        # 230V variants and FHEM has no device-type filter on battery frames either.
-        # The fallback condition (battery_percent is not None) handles 0x73 and any
-        # other device type dynamically: once a battery frame has been received and
-        # stored by the coordinator, the entity is created on the next HA restart.
-        _sends_battery = (
-            dev_code.is_binary_sensor  # 0xAB, 0xAC, 0x65 — guaranteed 0FFF1323
-            or dev_code.device_type == 0xE1  # format-29 embeds batteryPercent
-            or device_state.battery_percent is not None  # seen at runtime from any type
-        )
+        _sends_battery = dev_code.device_type in (0xAB, 0xAC, 0xE1)
         if _sends_battery:
             entities.append(
                 DuoFernBatterySensor(
@@ -491,15 +486,16 @@ class DuoFernStringSensor(DuoFernEntity, SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Battery sensor — works for all device types that transmit battery data
+# Battery sensor - created for 0xAB, 0xAC and 0xE1 only (see async_setup_entry)
 # ---------------------------------------------------------------------------
 
 
 class DuoFernBatterySensor(DuoFernEntity, SensorEntity, RestoreEntity):
-    """A battery level sensor for any DuoFern device that transmits battery data.
+    """A battery level sensor for the DuoFern devices that report a battery level.
 
     Battery data reaches us via two paths:
-      1. Dedicated battery frame (0FFF1323) — binary sensors 0xAB/0xAC/0x65.
+      1. Dedicated battery frame (0FFF1323) - 0xAB Rauchmelder and
+         0xAC Fenster-Tuer-Kontakt.
          Stored as DuoFernDeviceState.battery_percent / battery_state by the
          coordinator's _handle_battery_status().
       2. Embedded in regular status frames — 0xE1 Heizkörperantrieb (format 29,

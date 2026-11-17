@@ -384,6 +384,41 @@ async def test_battery_status_frames(hass: HomeAssistant) -> None:
         await unload_entry(hass, entry)
 
 
+async def test_battery_sensor_only_for_known_battery_devices(
+    hass: HomeAssistant,
+) -> None:
+    """Battery entity for 0xAB, 0xAC and 0xE1 only; a stale 0x65 one is removed."""
+    async with fake_stick():
+        entry = make_entry(hass, ["ABA1B2", "ACA1B2", "E1A1B2", "65A1B2", "73A1B2"])
+        registry = er.async_get(hass)
+        # Battery entity left behind by an older version for the Bewegungsmelder
+        registry.async_get_or_create(
+            "sensor", DOMAIN, "duofern_65A1B200_battery", config_entry=entry
+        )
+        coordinator = await setup_entry(hass, entry)
+
+        def battery(hex_code: str) -> str | None:
+            return registry.async_get_entity_id(
+                "sensor", DOMAIN, f"duofern_{hex_code}_battery"
+            )
+
+        assert battery("ABA1B2") is not None
+        assert battery("ACA1B2") is not None
+        assert battery("E1A1B2") is not None
+        assert battery("65A1B200") is None
+        assert battery("65A1B201") is None
+        assert battery("73A1B2") is None
+
+        # A battery frame from another type is stored and shown as attribute,
+        # but creates no battery entity.
+        feed(coordinator, "0FFF1323" + "3C" + "00" * 10 + "73A1B2" + "FFFFFF01")
+        await hass.async_block_till_done()
+        assert coordinator.data.devices["73A1B2"].battery_percent == 60
+        assert battery("73A1B2") is None
+
+        await unload_entry(hass, entry)
+
+
 async def test_frames_from_unknown_devices_are_ignored(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:

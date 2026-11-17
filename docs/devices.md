@@ -154,7 +154,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
 - **Bewegungsmelder (0x65)** - `motion` device class, state updated via `duofern_event`; lives on sub-channel "00" (sub-channel "01" is a switch actor, see [Switch Entities](#switch-entities-universalaktor-steckdosenaktor))
 - **Rauchmelder (0xAB)** - `smoke` device class, state updated via `duofern_event`; battery level is persisted across HA restarts
 - **Fenster-Tür-Kontakt (0xAC)** - `opening` device class; two entities per device: `opened` and `tilted`
-- **Battery sensor** - battery-powered sensors (Bewegungsmelder `0x65`, Rauchmelder `0xAB`, Fenster-Tür-Kontakt `0xAC`) get a dedicated **Battery** diagnostic sensor entity (0-100 %) visible on the device card. The last known value persists across HA restarts. `battery_state` (ok/low) is exposed as an attribute on the battery entity
+- **Battery sensor** - Rauchmelder (`0xAB`) and Fenster-Tür-Kontakt (`0xAC`) get a dedicated **Battery** diagnostic sensor entity (0-100 %) visible on the device card. The Bewegungsmelder (`0x65`) is mains powered (230 V) and has none. The last known value persists across HA restarts. `battery_state` (ok/low) is exposed as an attribute on the battery entity
 
 ### Binary Sensor Entities (Obstacle & Block Detection)
 
