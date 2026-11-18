@@ -1,15 +1,17 @@
 # Rademacher DuoFern Integration for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+[![Marketplace](https://img.shields.io/badge/Marketplace-Default-41BDF5.svg)](https://www.home-assistant.io/integrations/marketplace/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/HA%20Version-%3E%202026.8-18bcf2)](https://github.com/irstmon/homeassistant-duofern/blob/main/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/HA%20Version-%3E%3D%202026.11-18bcf2)](https://github.com/irstmon/homeassistant-duofern/blob/main/CHANGELOG.md)
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=irstmon&repository=homeassistant-duofern&category=integration)
+[![Open your Home Assistant instance and open this repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=irstmon&repository=homeassistant-duofern&category=integration)
 
 A custom Home Assistant integration for **Rademacher DuoFern** devices via the DuoFern USB stick.
 Communicates directly with the USB stick using the native serial protocol - via local USB or a network serial server - **no cloud, no gateway, fully local**.
 
 Forked from @MSchenkl and extensively rewritten to aim for a complete re-implementation based on the FHEM modules `10_DUOFERNSTICK.pm` and `30_DUOFERN.pm`, aiming for near-complete feature parity with the FHEM DuoFern module and the Homepilot / SmartHome Box.
+
+> **New in v2.4.0: Pair by Code now works with 10-digit codes.** Devices built since about 2020 carry a 10-digit code (e.g. `431234ABCD`). Enter all 10 digits in the **Device Code Input** field and press **Pair by Code**: the device is paired without a button press, like a 6-digit device. Everywhere else (device list in setup and options, device names) a device is always identified by its **first 6 digits** only. See [Pair by Code](#pair-by-code-code-pairing).
 
 📋 **[Supported Devices & Features](docs/devices.md)** - full device matrix and per-platform entity reference
 🔧 **[Protocol Reference](docs/protocol.md)** - frame format, init sequence, boost/pairing internals
@@ -18,17 +20,24 @@ Forked from @MSchenkl and extensively rewritten to aim for a complete re-impleme
 
 ## Installation
 
-### HACS (Recommended)
+**Requirements:** Home Assistant **2026.11 or newer** (since v2.4.0) and a Rademacher DuoFern USB stick, connected locally or through a network serial server (see [Network Serial (ser2net)](#network-serial-ser2net)).
 
-1. Open HACS in Home Assistant
-2. Click the three-dots menu → **Custom repositories**
-3. Add `https://github.com/irstmon/homeassistant-duofern` with category **Integration**
-4. Search for "Rademacher DuoFern" and install
-5. Restart Home Assistant
+### Marketplace (Recommended)
+
+Since Home Assistant 2026.11, HACS is built into Home Assistant as the **Marketplace**. This integration is listed in its default catalog, so no custom repository is needed.
+
+1. Go to **Settings → Marketplace** (administrators only; the first time you have to accept the warning), or use the button at the top of this page
+2. Search for **Rademacher DuoFern** and open it
+3. Select **Install**, check the version and select **Install** again
+4. The setup dialog usually opens right after the installation. If you close it, add the integration later under **Settings → Devices & services**. A restart is only needed if the Marketplace asks for it
+
+**Updates** appear under **Settings → Updates**, together with the release notes. Restart Home Assistant after installing an update.
+
+**Coming from HACS:** when Home Assistant is updated to 2026.11, everything installed with HACS moves to the Marketplace automatically and keeps getting updates. Nothing has to be reinstalled.
 
 ### Manual
 
-Copy the `custom_components/duofern/` folder to your HA config directory:
+Download `duofern.zip` from the [latest release](https://github.com/irstmon/homeassistant-duofern/releases/latest) and extract it into your HA config directory, or copy the `custom_components/duofern/` folder of this repository there:
 ```
 /config/custom_components/duofern/
 ```
@@ -40,16 +49,16 @@ Then restart Home Assistant.
 
 ### Step 1: Connection
 
-Go to **Settings → Devices & Services → Add Integration → DuoFern**
+Go to **Settings → Devices & Services → Add Integration → Rademacher DuoFern**
 
-- **Serial Connection** - select a local USB stick (e.g., `/dev/ttyUSB0`) from the dropdown, or type a `ser2net` network URL such as `socket://192.168.1.20:2000` or `rfc2217://192.168.1.20:2000`
+- **Serial Connection** - select a local USB stick (e.g., `/dev/ttyUSB0`) from the dropdown, or type a `ser2net` network URL such as `socket://192.168.1.20:2000` or `rfc2217://192.168.1.20:2000`. The integration opens the port and checks that a DuoFern stick answers there (waiting up to 2 s for a local port, 5 s for `socket://` and `rfc2217://`). If no DuoFern stick answers, setup stops with "not a DuoFern stick"
 - **System Code** - the 6-digit hex dongle serial (starts with `6F`, e.g., `6F1A2B`). Find it in your previous FHEM config (`ATTR dongle CODE`) or on the stick label. To preserve all existing pairings you need to use the same code as before! Otherwise all devices have to be re-paired
 
 #### I don't have FHEM and can't find my System Code anywhere
 
 Older Homepilot versions showed the system code somewhere in their settings, but as far as we know, **current Homepilot firmware no longer exposes it anywhere in the UI**. If you never used FHEM and can't find the code in an old export, you can't recover the *original* code your devices are currently paired to - there is no way around that.
 
-You can **pick a new System Code yourself and re-pair every device.** A code is valid as long as it follows the same pattern Rademacher itself uses for its dongles: 6 hex characters, starting with `6F`, followed by 4 arbitrary hex digits - e.g. `6FA51C`, `6F0001`, `6FDEAD`. Any value matching that pattern is accepted. **This will not be the same code your devices are already paired to**, so every single device will need to be re-paired from scratch ([physical pair-button press](#pair-by-set-button-connect-10-digit-covers), or [Pair by Code](#pair-by-code-code-pairing) if you know the device's own 6-digit code - this does not work for 10-digit codes!) before it responds to this integration.
+You can **pick a new System Code yourself and re-pair every device.** A code is valid as long as it follows the same pattern Rademacher itself uses for its dongles: 6 hex characters, starting with `6F`, followed by 4 arbitrary hex digits - e.g. `6FA51C`, `6F0001`, `6FDEAD`. Any value matching that pattern is accepted. **This will not be the same code your devices are already paired to**, so every single device will need to be re-paired from scratch ([physical pair-button press](#pair-by-set-button), or [Pair by Code](#pair-by-code-code-pairing) with the code printed on the device: 6 digits, or all 10 digits for devices built since about 2020) before it responds to this integration.
 
 **If Homepilot is still running and you can access it**, you can use remote-pairing for most devices instead of re-pairing everything by hand. Put a device into remote-pairing mode via Homepilot, then - once the stick is set up in HA - put the stick into pairing mode too and add devices one by one this way. A few devices don't have a remote-pair button at all, and even fewer devices don't support being bound to two hubs at once - the Heizkörperantrieb is one such exception. This way, a device ends up paired to both codes you control while Homepilot is still running, before you retire it.
 
@@ -61,24 +70,26 @@ Either way, re-pairing itself is safe and reversible - it doesn't require FHEM a
 Enter the 6-digit hex codes of your paired DuoFern devices, separated by commas:
 
 ```
-406B2D, 4090AE, 40B690, 436C1A
+40AB12, 42CD34, 46EF56, 43A1B2
 ```
 
-You can find the device codes in your FHEM configuration (`ATTR device CODE`) or on the enclosed labels. If you have (paired) devices with 10 digits, take only the first 6 digits.
+You can find the device codes in your FHEM configuration (`ATTR device CODE`) or on the enclosed labels.
+
+> **Only 6 digits here.** A device is always identified by its 6-digit code. If the label shows a 10-digit code (devices built since about 2020, e.g. `431234ABCD`), enter only the **first 6 digits** (`431234`) in this list. A 10-digit code is rejected here. All 10 digits are only needed for [Pair by Code](#pair-by-code-code-pairing).
 
 This field is optional - you can leave it empty and finish setup with zero devices, then add them
-afterwards via **Settings → Devices & Services → DuoFern → Configure**, [physical pairing](#pair-by-set-button-connect-10-digit-covers), or
+afterwards via **Settings → Devices & Services → DuoFern → Configure**, [physical pairing](#pair-by-set-button), or
 [Pair by Code](#pair-by-code-code-pairing). Useful for a from-scratch setup with no FHEM export or
 Homepilot access to read existing codes from - see [I don't have FHEM and can't find my System
 Code anywhere](#i-dont-have-fhem-and-cant-find-my-system-code-anywhere) above.
 
 ### Managing Devices After Setup
 
-Go to **Settings → Devices & Services → DuoFern → Configure** to add or remove device codes at any time. The integration reloads automatically.
+Go to **Settings → Devices & Services → DuoFern → Configure** to add or remove device codes (6 digits, same rule as above) or to switch [Automatic Device Discovery](#automatic-device-discovery) on or off. The integration reloads automatically.
 
 ### Changing the Serial Connection
 
-To change the serial port or network URL after initial setup, go to **Settings → Devices & Services → DuoFern → ⋮ → Reconfigure**. The form pre-fills the current value and validates the new connection before saving. The system code and paired device list are not affected.
+To change the serial port or network URL after initial setup, go to **Settings → Devices & Services → DuoFern → ⋮ → Reconfigure**. The form pre-fills the current value. A new port or URL is opened and checked for a DuoFern stick before saving. If you keep the port the integration is currently using, it is accepted without a check (Home Assistant opens serial ports exclusively, so the running integration's port can not be opened a second time) and the integration reloads. The system code and paired device list are not affected.
 
 ### Network Serial (ser2net)
 
@@ -125,7 +136,7 @@ This is useful if you forgot to add a device code during setup, or want to disco
 1. Note your system code and all device codes from FHEM (`list TYPE=DUOFERN`)
 2. Install this integration and enter the same codes during setup
 3. Device pairing is stored in the DuoFern devices themselves and tied to the system code - **as long as you use the same system code during setup, all previously paired devices will respond without re-pairing. No re-pairing needed**
-4. All device states are refreshed automatically via the startup status broadcast
+4. All device states are refreshed automatically via the startup status broadcast; devices that do not answer are asked again individually (see [General](#general))
 
 ---
 
@@ -144,35 +155,53 @@ These buttons appear on the **DuoFern Stick device card**:
 
 ### Pair by Code (Code-Pairing)
 
-Pair DuoFern devices by entering their 6-digit device code - **no physical button press required**. This replicates the Rademacher Homepilot "Code anmelden" functionality.
+Pair DuoFern devices by entering their **6-digit or 10-digit** device code - **no physical button press required**. This replicates the Rademacher Homepilot "Code anmelden" functionality.
 
 **How to use:**
 
 1. Put the device in pairing mode (within 2 hours of power-on, or set to RemotePair)
-2. Enter the 6-digit hex code (printed on the device) in the **"Pair by Code"** text field on the stick device card
+2. Enter the hex code printed on the device in the **"Device Code Input"** text field on the stick device card: 6 digits (e.g. `40AB12`), or all 10 digits for devices built since about 2020 (e.g. `431234ABCD`)
 3. Press the **"Pair by Code"** button
-4. If successful, the device is added automatically and the integration reloads
+4. If successful, the device is added automatically (with its 6-digit code) and the integration reloads. If the code is already in the device list, nothing changes and there is no reload
 
-Only 6-digit device codes are supported. 10-digit (2020+) devices must be paired using button press method.
+**10-digit codes:** the first 6 digits are the device code, the last 4 digits are a pairing password that is only sent with the pairing request and is not stored. After pairing the device is listed with its 6-digit code everywhere (device list, device names, entities). The 10-digit form is accepted for Pair by Code only (text field, button and action); the device lists in setup and options take 6 digits only.
 
-### Pair by set button (connect 10-digit covers)
+**Action `duofern.pair_device_by_code`**
+
+The same function is available as an action, for scripts and automations:
+
+```yaml
+action: duofern.pair_device_by_code
+data:
+  device_code: "40AB12"
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `device_code` | yes | 6-digit or 10-digit hex code of the device to pair. Lower case is accepted. |
+
+On success the action returns `device_code` (always the 6-digit device code) and `result: paired`, the device is added to the device list and the integration reloads. The action raises an error if the code is not 6 or 10 hex digits, if the integration is not loaded, if the device does not acknowledge the pairing request, if it rejects it, or if no answer arrives within 10 seconds.
+
+### Pair by set button
 
 1. Press the physical **set button** on the motor
 2. Press the **"Start pairing"** button  on the **DuoFern Stick device card**
-3. The motor moves up and down briefly to acknowledge the connction
+3. The motor moves up and down briefly to acknowledge the connection
 
 ### General
 
 - **Push-based, no polling** - devices push status updates; HA reflects changes immediately
-- **Status broadcast on startup** - on integration load, a full status broadcast ensures all device states are current
+- **Status broadcast on startup** - on integration load, a full status broadcast ensures all device states are current. Actors that do not answer are asked again individually, one per second: a first round after 30 s, a second round 30 s later. Devices that still do not answer are shown as **unavailable** 30 s after the second round, and they start as unavailable after the next restart until they answer. Devices that answered keep starting as available. The next status frame of a device makes it available again
 - **USB auto-discovery** - the stick is detected automatically via USB VID/PID when plugged in
 - **Network serial support** - connect via `ser2net` using `socket://host:port` (recommended) or `rfc2217://host:port` URLs; useful for virtualised HA environments where the USB stick is on another machine
-- **Battery sensor entity** - all battery-powered devices get a dedicated **Battery** diagnostic sensor entity on the device card. The last known value persists across HA restarts
+- **Battery sensor entity** - Rauchmelder, Fenster-Tür-Kontakt and Heizkörperantrieb get a dedicated **Battery** diagnostic sensor entity on the device card. The last known value persists across HA restarts
+- **Firmware version** - shown in the device info and kept across restarts
 - **Last Seen sensor** - every device gets a `Last Seen` timestamp sensor that updates whenever a frame is received, with `RestoreEntity` persistence
 - **Automatic device discovery** *(opt-in)* - unknown devices that send frames but are not yet in your paired list automatically appear in the HA Discovered inbox. Enable under **Settings → Devices & Services → DuoFern → Configure**. See [Automatic Device Discovery](#automatic-device-discovery) above
 - **Auto-add on pairing** - when a new device is learned via the stick's pairing button, its hex code is automatically written into the config and the integration reloads. No more digging through logs
 - **Auto-remove on unpairing** - when a device is unpaired during an active unpairing window, it is automatically removed from the config and the integration reloads
-- **Pair by Code** - pair devices by entering their 6-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
+- **Pair by Code** - pair devices by entering their 6-digit or 10-digit code directly in the UI, no button press on the device required. Replicates the Homepilot "Code anmelden" functionality
+- **Channel devices** - devices with several channels (Universalaktor, Umweltsensor, Bewegungsmelder, Wandtaster 6fach 230V) appear as one HA device per channel, named e.g. `DuoFern Universalaktor (43AB12) Channel 01`
 
 See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control Event Entities](docs/devices.md#remote-control-event-entities) in the devices reference for the full per-device button and event-entity list.
 
@@ -184,15 +213,15 @@ See [Per-Device Buttons](docs/devices.md#per-device-buttons) and [Remote Control
 ### Obstacle detection (any cover with obstacle hardware)
 
 ```yaml
-trigger:
-  - platform: state
+triggers:
+  - trigger: state
     entity_id: binary_sensor.duofern_rohrmotor_xxxxxx_obstacle
     to: "on"
-action:
-  - service: cover.open_cover
+actions:
+  - action: cover.open_cover
     target:
       entity_id: cover.duofern_rohrmotor_xxxxxx
-  - service: notify.notify
+  - action: notify.notify
     data:
       message: "Obstacle detected - shutter re-opened."
 ```
@@ -200,8 +229,8 @@ action:
 ### React to remote control button presses (event trigger)
 
 ```yaml
-trigger:
-  - platform: event
+triggers:
+  - trigger: event
     event_type: duofern_event
     event_data:
       device_code: "A0XXXX"
@@ -221,6 +250,15 @@ condition:
 ```
 
 ---
+
+## Removing the Integration
+
+1. Go to **Settings → Devices & Services → DuoFern**.
+2. Open the three-dot menu of the entry and select **Delete**. All DuoFern devices and entities are removed from Home Assistant.
+3. If the integration was installed through the Marketplace: go to **Settings → Marketplace**, open **Rademacher DuoFern**, select the three-dot menu and **Uninstall**. (If the integration is still configured, the Marketplace offers **Delete and uninstall**, which also does step 2.) For a manual installation delete the folder `custom_components/duofern`.
+4. Restart Home Assistant.
+
+Removing the integration does not unpair anything: the devices stay paired with the system code of the stick. To end a pairing, unpair the device first (see [Stick Control Buttons](#stick-control-buttons)) and remove the integration afterwards.
 
 ## AI disclaimer
 Yes, this project does make use of LLMs and coding agents, and this will likely continue going forward. AI is integrated deliberately and with care.

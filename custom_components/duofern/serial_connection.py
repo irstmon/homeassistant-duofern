@@ -13,10 +13,15 @@ import serial  # type: ignore[import-untyped]
 import serial_asyncio_fast  # type: ignore[import-untyped]
 
 from .const import SERIAL_BAUDRATE
+from .protocol import DuoFernEncoder
 
 _LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_NETWORK_SCHEMES = {"socket", "rfc2217"}
+
+# Seconds is_duofern_stick() waits for the answer to Init1.
+PROBE_TIMEOUT_LOCAL = 2
+PROBE_TIMEOUT_NETWORK = 5
 
 
 def validate_serial_location(location: str) -> bool:
@@ -54,6 +59,50 @@ def check_serial_connection(location: str) -> bool:
     except (OSError, serial.SerialException, ValueError) as err:
         _LOGGER.warning("Cannot open serial connection %s: %s", location, err)
         return False
+
+
+def is_duofern_stick(location: str) -> bool:
+    """Send the first init frame and check that a DuoFern stick answers.
+
+    The stick answers Init1 (01 00...) with a 22-byte frame that starts
+    with 0x81. Init1 is also the first frame of every init attempt of the
+    integration (10_DUOFERNSTICK.pm: DUOFERNSTICK_DoInit), so a stick that
+    has seen it once more is in the same state as after a retried init.
+
+    Must not be called for a port that is in use by a running integration:
+    the frame would reach a stick that is initialised and in operation.
+
+    A stick behind a network serial server (socket://, rfc2217://, e.g.
+    ser2net) gets more time to answer than a local port.
+    """
+    is_network = urlparse(location).scheme.lower() in SUPPORTED_NETWORK_SCHEMES
+    try:
+        connection = serial.serial_for_url(
+            location,
+            baudrate=SERIAL_BAUDRATE,
+            timeout=PROBE_TIMEOUT_NETWORK if is_network else PROBE_TIMEOUT_LOCAL,
+            write_timeout=1,
+        )
+    except (OSError, serial.SerialException, ValueError) as err:
+        _LOGGER.warning("Cannot open serial connection %s: %s", location, err)
+        return False
+    try:
+        connection.reset_input_buffer()
+        connection.write(bytes(DuoFernEncoder.build_init1()))
+        answer = connection.read(22)
+    except (OSError, serial.SerialException, ValueError) as err:
+        _LOGGER.warning("No DuoFern stick answer on %s: %s", location, err)
+        return False
+    finally:
+        connection.close()
+    if len(answer) == 22 and answer[0] == 0x81:
+        return True
+    _LOGGER.warning(
+        "Device on %s did not answer like a DuoFern stick (received %d bytes)",
+        location,
+        len(answer),
+    )
+    return False
 
 
 async def create_serial_connection(

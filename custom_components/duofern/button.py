@@ -5,7 +5,7 @@ Stick control buttons (appear on the Stick device card):
   - "Start unpairing"  (60s unpairing window, auto-stop)
   - "Status Broadcast" (broadcast status request to all paired devices)
 
-Cover dusk/dawn buttons (appear on each cover device card):
+Dusk/dawn buttons (appear on each cover, switch actor and dimmer device card):
   - "Dusk position"    Move to the device's programmed dusk position
   - "Dawn position"    Move to the device's programmed dawn position
 
@@ -20,8 +20,8 @@ Cover dusk/dawn buttons (appear on each cover device card):
 
   FHEM equivalents: set ROLLONAME dusk / set ROLLONAME dawn
 
-  In FHEM, dusk/dawn are part of %setsBasic (all covers) and
-  %setsSX5 (SX5 garage), and %setsDimmer (dimmers).
+  In FHEM, dusk/dawn are part of %setsDefaultRollerShutter (covers),
+  %setsSwitchActor (switch actors) and %setsDimmer (dimmers).
   In HA they appear as Buttons on the respective device card.
 """
 
@@ -36,12 +36,12 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator
-from .protocol import DuoFernId
+from .entity import DuoFernEntity, device_link
+from .protocol import DuoFernId, validate_pair_code
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -79,10 +79,14 @@ async def async_setup_entry(
             if device_state.channel
             else device_state.device_code
         )
-        if dc.is_cover or dc.is_switch:
+        # Dimmers (0x48/0x4A): %setsDimmer lists "dusk:noArg" and "dawn:noArg".
+        # SX5 (0x4E): %setsSX5 has neither dusk/dawn nor toggle, so the garage
+        # door gets none of the three buttons.
+        _is_sx5 = dc.device_type == 0x4E
+        if (dc.is_cover and not _is_sx5) or dc.is_switch or dc.is_light:
             entities.append(DuoFernDuskButton(coordinator, dc))
             entities.append(DuoFernDawnButton(coordinator, dc))
-        if dc.is_cover:
+        if dc.is_cover and not _is_sx5:
             entities.append(DuoFernToggleButton(coordinator, dc))
 
     # Reset buttons for all actuators (covers, switches, dimmers)
@@ -97,24 +101,31 @@ async def async_setup_entry(
         # this loop use dev_code.is_* properties, not the raw device_type int.
         # dev_type is only needed in the second loop below (Umweltsensor buttons).
 
-        # reset:settings,full for all devices that support it
-        # From 30_DUOFERN.pm %setsBasic / %setsReset: covers, switches, dimmers
-        # 0xE1 Heizkörperantrieb uses %setsHSA which has no reset commands
-        # 0x69 Umweltsensor is excluded on BOTH channels: channel "00" uses
-        # %setsUmweltsensor00 (no reset), and channel "01" — despite now
-        # matching is_cover — uses %setsDefaultRollerShutter +
-        # %setsUmweltsensor01 + %setsPair, which deliberately omits
-        # %setsBasic/%setsReset (30_DUOFERN.pm line ~624), unlike every
-        # other cover type.
-        # 0x65/0x74 channel "01" is excluded for the identical reason: FHEM
-        # dispatches %setsSwitchActor + %setsPair for it (line ~624), never
-        # %setsBasic/%setsReset — same pattern, different device types.
-        if dev_code.device_type not in (0x65, 0x69, 0x74) and (
-            dev_code.is_cover
-            or dev_code.is_switch
-            or dev_code.is_light
-            or (dev_code.is_climate and dev_code.device_type != 0xE1)
-        ):
+        # reset:settings,full - where FHEM offers %setsBasic / %setsReset:
+        #   covers, switch actors, dimmers, Raumthermostat: %setsBasic
+        #   0xE1 Heizkörperantrieb: %setsHSA, no reset
+        #   0x43 / 0x65 / 0x74 / 0x69: FHEM offers reset once per physical
+        #   device, on the base device (30_DUOFERN.pm):
+        #     %sets = (%setsReset, %setsUmweltsensor)       if CODE =~ /^69....$/
+        #     %sets = (%setsReset, "getStatus:noArg"=> "")  if CODE =~ /^(43|65|74)....$/
+        #   and not on the channel devices (%setsSwitchActor + %setsPair,
+        #   %setsUmweltsensor00, %setsUmweltsensor01). There is no separate
+        #   base device in HA, so the buttons sit on the "00" device of
+        #   0x65/0x69/0x74 and on channel "01" of the Universalaktor (0x43).
+        #   The frame is sent with channel byte 01, as from FHEM's base device.
+        _dt = dev_code.device_type
+        if _dt in (0x65, 0x69, 0x74):
+            _has_reset = dev_code.channel == "00"
+        elif _dt == 0x43:
+            _has_reset = dev_code.channel == "01"
+        else:
+            _has_reset = (
+                dev_code.is_cover
+                or dev_code.is_switch
+                or dev_code.is_light
+                or (dev_code.is_climate and _dt != 0xE1)
+            )
+        if _has_reset:
             entities.append(DuoFernResetSettingsButton(coordinator, dev_code))
             entities.append(DuoFernResetFullButton(coordinator, dev_code))
 
@@ -186,7 +197,7 @@ async def async_setup_entry(
 def _stick_device_info(
     coordinator: DuoFernCoordinator, system_code_hex: str
 ) -> DeviceInfo:
-    return DeviceInfo(identifiers={(DOMAIN, system_code_hex)})
+    return device_link(system_code_hex)
 
 
 # ---------------------------------------------------------------------------
@@ -194,10 +205,9 @@ def _stick_device_info(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernPairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernPairButton(DuoFernEntity, ButtonEntity):
     """Button to start 60s pairing window on the DuoFern stick."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "start_pairing"
     _attr_icon = "mdi:link-plus"
 
@@ -219,10 +229,9 @@ class DuoFernPairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         await self.coordinator.async_start_pairing()
 
 
-class DuoFernUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernUnpairButton(DuoFernEntity, ButtonEntity):
     """Button to start 60s unpairing window on the DuoFern stick."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "start_unpairing"
     _attr_icon = "mdi:link-off"
 
@@ -243,7 +252,7 @@ class DuoFernUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         await self.coordinator.async_start_unpairing()
 
 
-class DuoFernStopPairUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernStopPairUnpairButton(DuoFernEntity, ButtonEntity):
     """Button to stop an active pairing or unpairing window early.
 
     Only available (enabled) when pairing_active or unpairing_active is True.
@@ -251,7 +260,6 @@ class DuoFernStopPairUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonE
     depending on which mode is active.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "stop_pair_unpair"
     _attr_icon = "mdi:stop-circle-outline"
 
@@ -277,10 +285,9 @@ class DuoFernStopPairUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonE
             await self.coordinator.async_stop_pairing()
 
 
-class DuoFernStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernStatusButton(DuoFernEntity, ButtonEntity):
     """Button to request fresh status from all paired DuoFern devices."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "request_status"
     _attr_icon = "mdi:refresh"
 
@@ -299,7 +306,7 @@ class DuoFernStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernDuskButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernDuskButton(DuoFernEntity, ButtonEntity):
     """Move a cover to its programmed dusk (closing) position.
 
     Dusk position is typically slower/quieter than position=0 because
@@ -311,7 +318,6 @@ class DuoFernDuskButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     FHEM: set ROLLONAME dusk
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "cover_dusk"
     _attr_icon = "mdi:weather-sunset-down"
 
@@ -324,16 +330,14 @@ class DuoFernDuskButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_dusk"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hex_code)},
-        )
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         """Command the cover to move to its dusk position."""
         await self.coordinator.async_cover_dusk(self._device_code)
 
 
-class DuoFernDawnButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernDawnButton(DuoFernEntity, ButtonEntity):
     """Move a cover to its programmed dawn (opening) position.
 
     Dawn position is the device's stored program for morning opening,
@@ -345,7 +349,6 @@ class DuoFernDawnButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     FHEM: set ROLLONAME dawn
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "cover_dawn"
     _attr_icon = "mdi:weather-sunset-up"
 
@@ -358,9 +361,7 @@ class DuoFernDawnButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_dawn"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, hex_code)},
-        )
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         """Command the cover to move to its dawn position."""
@@ -372,14 +373,13 @@ class DuoFernDawnButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernToggleButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernToggleButton(DuoFernEntity, ButtonEntity):
     """Toggle cover direction (reverse current movement / change direction).
 
     From 30_DUOFERN.pm: toggle => {cmd => {noArg => "071A0000000000000000"}}
     FHEM command: set DEVICENAME toggle
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "cover_toggle"
     _attr_icon = "mdi:swap-vertical"
     _attr_entity_category = None  # main action
@@ -393,7 +393,7 @@ class DuoFernToggleButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_toggle"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_cover_toggle(self._device_code)
@@ -404,14 +404,13 @@ class DuoFernToggleButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernResetSettingsButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernResetSettingsButton(DuoFernEntity, ButtonEntity):
     """Reset device settings (keeps pairing).
 
     From 30_DUOFERN.pm: reset => {settings => "0815CB00000000000000"}
     FHEM command: set DEVICENAME reset settings
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "reset_settings"
     _attr_icon = "mdi:restore"
     _attr_entity_category = EntityCategory.CONFIG
@@ -425,20 +424,19 @@ class DuoFernResetSettingsButton(CoordinatorEntity[DuoFernCoordinator], ButtonEn
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_reset_settings"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_reset(self._device_code, "settings")
 
 
-class DuoFernResetFullButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernResetFullButton(DuoFernEntity, ButtonEntity):
     """Full factory reset of the device (loses pairing).
 
     From 30_DUOFERN.pm: reset => {full => "0815CC00000000000000"}
     FHEM command: set DEVICENAME reset full
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "reset_full"
     _attr_icon = "mdi:delete-forever"
     _attr_entity_category = EntityCategory.CONFIG
@@ -452,7 +450,7 @@ class DuoFernResetFullButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_reset_full"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_reset(self._device_code, "full")
@@ -463,14 +461,13 @@ class DuoFernResetFullButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
 # ---------------------------------------------------------------------------
 
 
-class DuoFernRemotePairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernRemotePairButton(DuoFernEntity, ButtonEntity):
     """Initiate remote pairing with a Handsender or Wandtaster.
 
     From 30_DUOFERN.pm: remotePair => uses duoCommand2
     FHEM command: set DEVICENAME remotePair
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "remote_pair"
     _attr_icon = "mdi:remote"
     _attr_entity_category = EntityCategory.CONFIG
@@ -484,20 +481,19 @@ class DuoFernRemotePairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_pair"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_remote_pair(self._device_code)
 
 
-class DuoFernRemoteUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernRemoteUnpairButton(DuoFernEntity, ButtonEntity):
     """Remove remote pairing with a Handsender or Wandtaster.
 
     From 30_DUOFERN.pm: remoteUnpair => uses duoCommand2
     FHEM command: set DEVICENAME remoteUnpair
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "remote_unpair"
     _attr_icon = "mdi:remote-off"
     _attr_entity_category = EntityCategory.CONFIG
@@ -511,20 +507,19 @@ class DuoFernRemoteUnpairButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_unpair"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_remote_unpair(self._device_code)
 
 
-class DuoFernRemoteStopButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernRemoteStopButton(DuoFernEntity, ButtonEntity):
     """Stop remote pairing/unpairing mode on a device.
 
     OTA-verified 2026-03-10: f[2]=0x06, f[3]=0x03.
     Ends the pairing window early after a remotePair or remoteUnpair press.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "remote_stop"
     _attr_icon = "mdi:remote-off"
     _attr_entity_category = EntityCategory.CONFIG
@@ -538,7 +533,7 @@ class DuoFernRemoteStopButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_remote_stop"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_remote_stop(self._device_code)
@@ -549,7 +544,7 @@ class DuoFernRemoteStopButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
 # ---------------------------------------------------------------------------
 
 
-class DuoFernActTempLimitButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernActTempLimitButton(DuoFernEntity, ButtonEntity):
     """Activate one of the four temperature threshold zones on the Raumthermostat.
 
     Sends actTempLimit=N to the device, which makes the thermostat use
@@ -564,7 +559,6 @@ class DuoFernActTempLimitButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
       actTempLimit:1,2,3,4
     """
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
@@ -580,7 +574,7 @@ class DuoFernActTempLimitButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_act_temp_limit_{zone}"
         self._attr_translation_key = f"act_temp_limit_{zone}"
         self._attr_icon = f"mdi:thermometer-{['low', 'low', 'high', 'high'][zone - 1]}"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         """Activate this temperature zone on the thermostat."""
@@ -594,7 +588,7 @@ class DuoFernActTempLimitButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnt
 # ---------------------------------------------------------------------------
 
 
-class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernGetStatusButton(DuoFernEntity, ButtonEntity):
     """Request current status from a single DuoFern device.
 
     From 30_DUOFERN.pm: getStatus => commandsStatus{getStatus} = "0F"
@@ -606,7 +600,6 @@ class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     FHEM command: set DEVICENAME getStatus
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "get_status"
     _attr_icon = "mdi:refresh-circle"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -616,7 +609,7 @@ class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_status"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_get_status_device(self._device_code)
@@ -627,14 +620,13 @@ class DuoFernGetStatusButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
 # ---------------------------------------------------------------------------
 
 
-class DuoFernGetWeatherButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernGetWeatherButton(DuoFernEntity, ButtonEntity):
     """Request weather data from Umweltsensor weather station.
 
     From 30_DUOFERN.pm: getWeather => commandsStatus{getWeather} = "13"
     FHEM command: set DEVICENAME getWeather
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "get_weather"
     _attr_icon = "mdi:weather-partly-cloudy"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -644,20 +636,19 @@ class DuoFernGetWeatherButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_weather"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_get_weather(self._device_code)
 
 
-class DuoFernGetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernGetTimeButton(DuoFernEntity, ButtonEntity):
     """Request time from Umweltsensor.
 
     From 30_DUOFERN.pm: getTime => commandsStatus{getTime} = "10"
     FHEM command: set DEVICENAME getTime
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "get_time"
     _attr_icon = "mdi:clock-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -667,13 +658,13 @@ class DuoFernGetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_time"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_get_time(self._device_code)
 
 
-class DuoFernGetConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernGetConfigButton(DuoFernEntity, ButtonEntity):
     """Request configuration from Umweltsensor (register dump).
 
     From 30_DUOFERN.pm:
@@ -681,7 +672,6 @@ class DuoFernGetConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
     FHEM command: set DEVICENAME00 getConfig
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "get_config"
     _attr_icon = "mdi:cog-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -691,13 +681,13 @@ class DuoFernGetConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_get_config"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_get_weather_config(self._device_code)
 
 
-class DuoFernSetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernSetTimeButton(DuoFernEntity, ButtonEntity):
     """Sync current system time to Umweltsensor.
 
     From 30_DUOFERN.pm:
@@ -705,7 +695,6 @@ class DuoFernSetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
     FHEM command: set DEVICENAME00 time
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "set_time"
     _attr_icon = "mdi:clock-check"
 
@@ -714,13 +703,13 @@ class DuoFernSetTimeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_set_time"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_set_time(self._device_code)
 
 
-class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernWriteConfigButton(DuoFernEntity, ButtonEntity):
     """Write all stored configuration registers to the Umweltsensor.
 
     From 30_DUOFERN.pm:
@@ -732,7 +721,6 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
     FHEM command: set DEVICENAME00 writeConfig
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "write_config"
     _attr_icon = "mdi:content-save-cog"
     _attr_entity_category = EntityCategory.CONFIG
@@ -742,7 +730,7 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
         self._device_code = device_code
         hex_code = device_code.full_hex
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_write_config"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     async def async_press(self) -> None:
         await self.coordinator.async_write_weather_config(self._device_code)
@@ -753,7 +741,7 @@ class DuoFernWriteConfigButton(CoordinatorEntity[DuoFernCoordinator], ButtonEnti
 # ---------------------------------------------------------------------------
 
 
-class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntity):
+class DuoFernPairByCodeButton(DuoFernEntity, ButtonEntity):
     """Button that triggers pair-by-code using the code from DuoFernPairCodeText.
 
     Reads the current value of the pair_code_input text entity that lives on
@@ -761,7 +749,6 @@ class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
     coordinator. The result is shown as a persistent notification.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "pair_by_code"
     _attr_icon = "mdi:link-lock"
     _attr_entity_category = EntityCategory.CONFIG
@@ -771,7 +758,7 @@ class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
         super().__init__(coordinator)
         self._system_code_hex = system_code_hex
         self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_pair_by_code"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, system_code_hex)})
+        self._attr_device_info = device_link(system_code_hex)
 
     @property
     def available(self) -> bool:
@@ -791,11 +778,8 @@ class DuoFernPairByCodeButton(CoordinatorEntity[DuoFernCoordinator], ButtonEntit
             if state:
                 device_code = state.state.strip().upper()
 
-        if (
-            not device_code
-            or len(device_code) != 6
-            or not all(c in "0123456789ABCDEF" for c in device_code)
-        ):
+        # 6 digits, or 10 digits for devices with a pairing password.
+        if not validate_pair_code(device_code):
             raise HomeAssistantError(
                 translation_domain=DOMAIN,
                 translation_key="pair_no_input",

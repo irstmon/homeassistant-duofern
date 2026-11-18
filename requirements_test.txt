@@ -1,0 +1,10 @@
+# Test dependencies. pytest-homeassistant (published by Home Assistant) pins the matching
+# Home Assistant version and pytest plugins.
+pytest-homeassistant
+pytest-cov
+# Runtime requirement of the integration (manifest.json)
+pyserial-asyncio-fast==0.16
+# Needed by the Home Assistant "usb" component, a dependency of this integration
+aiousbwatcher
+serialx
+aiohasupervisor

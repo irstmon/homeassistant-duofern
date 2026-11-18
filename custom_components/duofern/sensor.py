@@ -43,16 +43,15 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DUOFERN_EVENT, DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -243,28 +242,23 @@ async def async_setup_entry(
                     hex_code,
                 )
 
-        # Battery sensor: created for every device type that is known to transmit
-        # battery data — either via dedicated 0FFF1323 battery frames (binary
-        # sensors 0xAB/0xAC/0x65) or embedded in regular status frames (0xE1
-        # format 29 batteryPercent, 0x73 Raumthermostat).
-        # Also created dynamically for any device that already has battery data
-        # stored (handles unknown future device types that happen to send it).
-        #
+        # Battery sensor: only for the device types that are known to report a
+        # battery level:
+        #   0xAB Rauchmelder and 0xAC Fenster-Tuer-Kontakt send dedicated
+        #   0FFF1323 battery frames (0xAC: seen in a real RX log; 0xAB: the
+        #   radio module reports its battery level once a day per Rademacher).
+        #   0xE1 Heizkoerperantrieb embeds batteryPercent in every format-29
+        #   status frame (statusId 185).
+        # FHEM has no type list: it stores batteryState/batteryPercent from a
+        # 0FFF1323 frame of any device as readings. The coordinator does the
+        # same (_handle_battery_status), so a battery frame from any other
+        # type is still stored and shown as battery_level/battery_state
+        # attribute by the cover, switch, climate, binary_sensor and sensor
+        # entities of that device, but no dedicated battery sensor is created.
+        # 0x65 Bewegungsmelder is mains powered (230 V) and gets none.
         # The entity uses RestoreEntity so the last known value survives a
         # restart without waiting for the next battery transmission.
-        # Statically known battery senders:
-        #   is_binary_sensor (0xAB/0xAC/0x65) always send 0FFF1323 battery frames.
-        #   0xE1 Heizkörperantrieb embeds batteryPercent in every format-29 status frame.
-        # 0x73 Raumthermostat is NOT included — it exists in both battery-powered and
-        # 230V variants and FHEM has no device-type filter on battery frames either.
-        # The fallback condition (battery_percent is not None) handles 0x73 and any
-        # other device type dynamically: once a battery frame has been received and
-        # stored by the coordinator, the entity is created on the next HA restart.
-        _sends_battery = (
-            dev_code.is_binary_sensor  # 0xAB, 0xAC, 0x65 — guaranteed 0FFF1323
-            or dev_code.device_type == 0xE1  # format-29 embeds batteryPercent
-            or device_state.battery_percent is not None  # seen at runtime from any type
-        )
+        _sends_battery = dev_code.device_type in (0xAB, 0xAC, 0xE1)
         if _sends_battery:
             entities.append(
                 DuoFernBatterySensor(
@@ -316,7 +310,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern sensor entities", len(entities))
 
 
-class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+class DuoFernSensor(DuoFernEntity, SensorEntity):
     """A single measurement from a DuoFern weather/environment sensor.
 
     State is updated when the coordinator receives a weather data frame
@@ -328,7 +322,6 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     """
 
     entity_description: DuoFernSensorDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -405,29 +398,19 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -436,7 +419,7 @@ class DuoFernSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
 # ---------------------------------------------------------------------------
 
 
-class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
+class DuoFernStringSensor(DuoFernEntity, SensorEntity):
     """A single string-valued reading (e.g. device date/time).
 
     Identical to DuoFernSensor except native_value returns the raw string
@@ -447,7 +430,6 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     """
 
     entity_description: DuoFernSensorDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -491,14 +473,11 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -507,17 +486,16 @@ class DuoFernStringSensor(CoordinatorEntity[DuoFernCoordinator], SensorEntity):
 
 
 # ---------------------------------------------------------------------------
-# Battery sensor — works for all device types that transmit battery data
+# Battery sensor - created for 0xAB, 0xAC and 0xE1 only (see async_setup_entry)
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBatterySensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
-    """A battery level sensor for any DuoFern device that transmits battery data.
+class DuoFernBatterySensor(DuoFernEntity, SensorEntity, RestoreEntity):
+    """A battery level sensor for the DuoFern devices that report a battery level.
 
     Battery data reaches us via two paths:
-      1. Dedicated battery frame (0FFF1323) — binary sensors 0xAB/0xAC/0x65.
+      1. Dedicated battery frame (0FFF1323) - 0xAB Rauchmelder and
+         0xAC Fenster-Tuer-Kontakt.
          Stored as DuoFernDeviceState.battery_percent / battery_state by the
          coordinator's _handle_battery_status().
       2. Embedded in regular status frames — 0xE1 Heizkörperantrieb (format 29,
@@ -528,7 +506,6 @@ class DuoFernBatterySensor(
     HA restart without waiting for the next battery transmission.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "battery"
     _attr_device_class = SensorDeviceClass.BATTERY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -616,14 +593,11 @@ class DuoFernBatterySensor(
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
@@ -645,9 +619,7 @@ class DuoFernBatterySensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernValveSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernValveSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Sensor showing the current valve opening position of the radiator valve.
 
     From 30_DUOFERN.pm format "29" statusId 186:
@@ -660,7 +632,6 @@ class DuoFernValveSensor(
     an HA restart — battery devices can take minutes before their first frame.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "valve_position"
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -676,7 +647,7 @@ class DuoFernValveSensor(
         super().__init__(coordinator)
         self._hex_code = hex_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_valve_position"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: float | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -727,9 +698,7 @@ class DuoFernValveSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernLastSeenSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernLastSeenSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Sensor that shows when the device last sent any signal.
 
     Updated on every status frame, sensor event, weather frame, and battery
@@ -740,7 +709,6 @@ class DuoFernLastSeenSensor(
     the sensor would show 'unknown' until the next frame arrives.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "last_seen"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -806,14 +774,11 @@ class DuoFernLastSeenSensor(
     def device_info(self) -> DeviceInfo:
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=f"DuoFern {self._device_code.device_type_name} ({self._hex_code})",
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
 
@@ -822,9 +787,7 @@ class DuoFernLastSeenSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernBoostStartSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernBoostStartSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Timestamp sensor: when was the last boost started?
 
     Set in the coordinator when boost transitions from inactive → active
@@ -834,7 +797,6 @@ class DuoFernBoostStartSensor(
     HA renders datetime sensors as relative time: "vor 13 Minuten".
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "boost_started"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:clock-start"
@@ -849,7 +811,7 @@ class DuoFernBoostStartSensor(
         super().__init__(coordinator)
         self._hex_code = hex_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost_started"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: datetime | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -899,9 +861,7 @@ class DuoFernBoostStartSensor(
 # ---------------------------------------------------------------------------
 
 
-class DuoFernActiveGrenzwerteSensor(
-    CoordinatorEntity[DuoFernCoordinator], SensorEntity, RestoreEntity
-):
+class DuoFernActiveGrenzwerteSensor(DuoFernEntity, SensorEntity):
     """Reports which of the up to 5 configured Grenzwerte (trigger slots)
     are currently active for one trigger type (Sonne / Wind / Temperatur).
 
@@ -921,6 +881,14 @@ class DuoFernActiveGrenzwerteSensor(
     the bits present to the active set, an endX event removes them. native_value
     is the sorted, comma-joined list of active slot numbers (e.g. "1,3"), or
     "" when none are active.
+
+    Deliberately NOT a RestoreEntity: the active set is built purely from
+    start/end events. Events that happen while HA is down or the integration
+    is reloading are lost, so a restored list could claim a Grenzwert is
+    still active long after it ended (or miss one that started). The state
+    is therefore "unknown" (native_value None) after every load until the
+    first real start/end event of this trigger type has been processed
+    (see _has_data); from then on the list is maintained from live events.
 
     Deliberately reports a slot LIST instead of 5 separate boolean entities
     per trigger type (15 total across Sun/Wind/Temp) to avoid entity
@@ -942,8 +910,6 @@ class DuoFernActiveGrenzwerteSensor(
     is indeterminate in that case. We skip updating the active set and log a
     debug message rather than guessing.
     """
-
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -973,20 +939,15 @@ class DuoFernActiveGrenzwerteSensor(
         # exactly what @geraldeberle1234 saw (English text despite German HA language).
         self._attr_translation_key = translation_key
         self._attr_icon = icon
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._active_slots: set[int] = set()
+        # False until the first start/end event with a valid bitmask has been
+        # processed since this entity was loaded (see class docstring).
+        self._has_data: bool = False
 
     async def async_added_to_hass(self) -> None:
-        """Restore last known active slots and subscribe to events."""
+        """Subscribe to events (the state is deliberately not restored)."""
         await super().async_added_to_hass()
-        last_state = await self.async_get_last_state()
-        if last_state and last_state.state not in ("unknown", "unavailable", ""):
-            try:
-                self._active_slots = {
-                    int(s) for s in last_state.state.split(",") if s.strip()
-                }
-            except ValueError:
-                self._active_slots = set()
         self.async_on_remove(
             self.hass.bus.async_listen(DUOFERN_EVENT, self._handle_duofern_event)
         )
@@ -1002,8 +963,15 @@ class DuoFernActiveGrenzwerteSensor(
         return self._device_state is not None
 
     @property
-    def native_value(self) -> str:
-        """Sorted, comma-joined list of currently active Grenzwert numbers."""
+    def native_value(self) -> str | None:
+        """Sorted, comma-joined list of currently active Grenzwert numbers.
+
+        Returns None ("unknown" in the UI) until the first real event has
+        been processed since this entity was loaded - see _has_data and the
+        class docstring for why this is deliberately not restored or assumed.
+        """
+        if not self._has_data:
+            return None
         return ",".join(str(n) for n in sorted(self._active_slots))
 
     @callback
@@ -1043,6 +1011,7 @@ class DuoFernActiveGrenzwerteSensor(
             self._active_slots |= bits
         else:
             self._active_slots -= bits
+        self._has_data = True
         self.async_write_ha_state()
 
     @callback

@@ -35,14 +35,13 @@ from homeassistant.components.number import (
 )
 from homeassistant.const import EntityCategory, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +58,9 @@ class DuoFernNumberDescription(NumberEntityDescription):
     # Used for 0x69 Umweltsensor to keep config numbers on "00" and actor
     # numbers on "01".
     channel_filter: str | None = None
+    # Raw device value = UI value * value_scale. 1.0 (default) means the
+    # reading and the command use the same unit as the UI.
+    value_scale: float = 1.0
 
 
 # ALL_COVER_TYPES and TROLL_COVER_TYPES are imported from const.py to avoid
@@ -129,6 +131,9 @@ NUMBER_DESCRIPTIONS: tuple[DuoFernNumberDescription, ...] = (
         icon="mdi:timer",
         device_types=_BLINDS_TYPES,
         coordinator_method="async_set_slat_run_time",
+        # Device value is 0-50 (30_DUOFERN.pm: slatRunTime min 0, max 50),
+        # shown here as 0.1-5.0 s, so one raw step is 0.1 s.
+        value_scale=10.0,
     ),
     DuoFernNumberDescription(
         key="defaultSlatPos",
@@ -476,7 +481,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern number entities", len(entities))
 
 
-class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, RestoreEntity):
+class DuoFernNumber(DuoFernEntity, NumberEntity, RestoreEntity):
     """A DuoFern numeric configuration value as a NumberEntity (slider).
 
     The current value is read from device status readings.
@@ -488,7 +493,6 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
     """
 
     entity_description: DuoFernNumberDescription
-    _attr_has_entity_name = True
     _attr_mode = NumberMode.SLIDER
 
     def __init__(
@@ -500,10 +504,17 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
-        self._device_code = device_state.device_code
+        # Universalaktor (0x43): the command frame has to carry this entity's
+        # channel (FHEM: cc = chanNo), so the coordinator gets the channel-
+        # carrying code. Every other device keeps the plain 6-digit code.
+        self._device_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.device_code.device_type == 0x43 and device_state.channel
+            else device_state.device_code
+        )
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         self._restored_value: float | None = None
 
     async def async_added_to_hass(self) -> None:
@@ -538,7 +549,7 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
             val = state.status.readings.get(self.entity_description.reading_key)
             if val is not None:
                 try:
-                    live = float(val)
+                    live = float(val) / self.entity_description.value_scale
                     self._restored_value = live  # keep in sync for next restart
                     return live
                 except (TypeError, ValueError):
@@ -554,7 +565,9 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
         perform their own rounding/conversion internally.
         """
         method = getattr(self.coordinator, self.entity_description.coordinator_method)
-        await method(self._device_code, float(value))
+        await method(
+            self._device_code, float(value) * self.entity_description.value_scale
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -571,11 +584,10 @@ class DuoFernNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity, Restore
 #     confirmed against a real Homepilot slider endpoint — safe assumption,
 #     @geraldeberle1234 asked to verify
 #   Sonne "Ab Temperatur von": bit-width + consistent with @geraldeberle1234's screenshots
-#   Sonnenrichtung Zielwinkel: safe assumption (continuous Number with the
-#     22.5° step instead of a fixed option list) — @geraldeberle1234 asked whether 0°/
-#     337.5° are valid Homepilot values or not; using Number here means this
-#     doesn't need to be "right" up front, only the min/max needs revisiting
-#     later if it turns out too narrow or too wide
+#   Sonnenrichtung Zielwinkel / Bereich and Sonnenhöhe are not Numbers:
+#     they are Select entities with fixed option lists, see select.py
+#     (DuoFernSunDirectionAngleSelect, DuoFernSunDirectionWidthSelect,
+#     DuoFernSunHeightTargetSelect, DuoFernSunHeightWidthSelect).
 
 
 @dataclass(frozen=True)
@@ -714,12 +726,11 @@ GRENZWERT_NUMBER_DESCRIPTIONS: tuple[DuoFernGrenzwertNumberDescription, ...] = (
 )
 
 
-class DuoFernGrenzwertNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity):
+class DuoFernGrenzwertNumber(DuoFernEntity, NumberEntity):
     """Generic value slider for whichever Grenzwert is currently selected
     in its trigger group (see DuoFernGrenzwertSelector in select.py).
     """
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
@@ -744,7 +755,7 @@ class DuoFernGrenzwertNumber(CoordinatorEntity[DuoFernCoordinator], NumberEntity
         self._attr_native_max_value = description.native_max_value
         self._attr_native_step = description.native_step
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:

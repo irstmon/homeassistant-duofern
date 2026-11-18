@@ -43,3 +43,9 @@ fhem.cfg
 # Claude Code
 .claude/
 NOTES.md
+
+# Tests
+.coverage
+.pytest_cache/
+htmlcov/
+tests/testing_config/

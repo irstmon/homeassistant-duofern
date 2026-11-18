@@ -21,6 +21,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -36,7 +37,7 @@ from .const import (
     DOMAIN,
 )
 from .protocol import validate_device_code, validate_system_code
-from .serial_connection import check_serial_connection
+from .serial_connection import check_serial_connection, is_duofern_stick
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,6 +77,10 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                     if not port_valid:
                         errors[CONF_SERIAL_PORT] = "cannot_connect"
+                    elif not await self.hass.async_add_executor_job(
+                        is_duofern_stick, serial_port
+                    ):
+                        errors[CONF_SERIAL_PORT] = "not_a_duofern_stick"
                 except Exception:
                     _LOGGER.exception("Error checking serial port")
                     errors["base"] = "unknown"
@@ -173,21 +178,46 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             serial_port = user_input[CONF_SERIAL_PORT].strip()
 
+            # The port the loaded integration is using right now is not
+            # checked at all. Home Assistant opens serial ports exclusively
+            # (homeassistant.block_shared_serial), so a second open of that
+            # port fails although it works; and its stick is initialised and
+            # in operation, an init frame from a second connection would
+            # disturb it.
+            port_in_use = (
+                entry.state is ConfigEntryState.LOADED
+                and serial_port == entry.data.get(CONF_SERIAL_PORT)
+            )
             try:
-                port_valid = await self.hass.async_add_executor_job(
+                if port_in_use:
+                    pass
+                elif not await self.hass.async_add_executor_job(
                     check_serial_connection, serial_port
-                )
-                if not port_valid:
+                ):
                     errors[CONF_SERIAL_PORT] = "cannot_connect"
+                elif not await self.hass.async_add_executor_job(
+                    is_duofern_stick, serial_port
+                ):
+                    errors[CONF_SERIAL_PORT] = "not_a_duofern_stick"
             except Exception:
                 _LOGGER.exception("Error checking serial port during reconfigure")
                 errors["base"] = "unknown"
 
             if not errors:
-                return self.async_update_reload_and_abort(
+                # The update listener registered in async_setup_entry reloads
+                # the entry whenever its data changes, so
+                # async_update_reload_and_abort (deprecated by HA in
+                # combination with an update listener, announced to break in
+                # 2026.12) is not used here. An
+                # unchanged port does not trigger the listener - reload
+                # explicitly in that case so "reconfigure" always reconnects.
+                changed = self.hass.config_entries.async_update_entry(
                     entry,
                     data={**entry.data, CONF_SERIAL_PORT: serial_port},
                 )
+                if not changed:
+                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                return self.async_abort(reason="reconfigure_successful")
 
         current_port = entry.data.get(CONF_SERIAL_PORT, "")
         ports = await self.hass.async_add_executor_job(serial.tools.list_ports.comports)
@@ -291,12 +321,11 @@ class DuoFernConfigFlow(ConfigFlow, domain=DOMAIN):
                 existing_bases = {c[:6] for c in current}
                 if self._discovered_device_hex[:6] not in existing_bases:
                     current.append(self._discovered_device_hex)
+                    # No explicit reload: the update listener registered in
+                    # async_setup_entry reloads the entry on this data change.
                     self.hass.config_entries.async_update_entry(
                         entry,
                         data={**entry.data, CONF_PAIRED_DEVICES: current},
-                    )
-                    self.hass.async_create_task(
-                        self.hass.config_entries.async_reload(entry.entry_id)
                     )
             return self.async_abort(reason="device_added")
 

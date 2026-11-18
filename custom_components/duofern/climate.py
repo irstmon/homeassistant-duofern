@@ -17,12 +17,12 @@ Heizkörperantrieb (0xE1) format "29" readings:
   desired-temp, measured-temp, manualMode, timeAutomatic,
   sendingInterval, batteryPercent, valvePosition, forceResponse
 
-  The HSA has a special bidirectional protocol: on receipt of a status
+  The HSA has a special device-initiated protocol: on receipt of a status
   frame, pending set-values are encoded back. FHEM stores these in
-  hash->{helper}{HSAold} and sends them in the next status ACK.
-  We implement a simpler version: desired-temp is sent via the
-  coordinator's async_switch_on/off mechanism, which triggers a
-  status request after ACK.
+  hash->{helper}{HSAold} and sends them with duoSetHSA when the next
+  status frame arrives. The coordinator does the same: changes are queued
+  in DuoFernDeviceState.hsa_pending and sent by _send_hsa_if_pending()
+  when the device checks in with its next status frame.
 
   From 30_DUOFERN.pm:
     #Heizkörperantrieb
@@ -44,15 +44,14 @@ from homeassistant.components.climate import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,9 +99,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern climate entities", len(entities))
 
 
-class DuoFernClimate(
-    CoordinatorEntity[DuoFernCoordinator], ClimateEntity, RestoreEntity
-):
+class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
     """A DuoFern thermostat or radiator valve as a HA ClimateEntity.
 
     Supports HEAT and OFF modes:
@@ -117,9 +114,8 @@ class DuoFernClimate(
       actTempLimit:1,2,3,4       — active threshold selection
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
-    _attr_temperature_unit = UnitOfTemperature.CELSIUS
+    _attr_native_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
@@ -188,7 +184,7 @@ class DuoFernClimate(
         return state.available and self.coordinator.last_update_success
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         """Return current measured temperature.
 
         Falls back to the last restored value until the first live frame
@@ -202,7 +198,7 @@ class DuoFernClimate(
         return self._restored_measured_temp
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         """Return the desired/set temperature.
 
         Falls back to the last restored value until the first live frame
@@ -310,26 +306,16 @@ class DuoFernClimate(
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()

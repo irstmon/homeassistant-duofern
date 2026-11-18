@@ -42,15 +42,14 @@ from homeassistant.components.switch import (
 )
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import ALL_COVER_TYPES, DOMAIN, TROLL_COVER_TYPES
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description, device_link
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -696,7 +695,7 @@ async def async_setup_entry(
 # ===========================================================================
 
 
-class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
+class DuoFernSwitch(DuoFernEntity, SwitchEntity):
     """A DuoFern switch actor channel as a HA SwitchEntity.
 
     For the Universalaktor (0x43), hex_code is the 8-char channel code.
@@ -707,7 +706,6 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
       off => "0E02tt00000000000000"
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
 
     def __init__(
@@ -739,12 +737,6 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
             self._attr_device_class = SwitchDeviceClass.OUTLET
         else:
             self._attr_device_class = SwitchDeviceClass.SWITCH
-
-        self._channel_label = (
-            f" Channel {self._channel}"
-            if self._channel and self._device_code.has_channels
-            else ""
-        )
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -801,31 +793,18 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(
-                f"DuoFern {self._device_code.device_type_name}"
-                f" ({self._device_code.hex}){self._channel_label}"
-            ),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -834,9 +813,7 @@ class DuoFernSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
 # ===========================================================================
 
 
-class DuoFernAutomationSwitch(
-    CoordinatorEntity[DuoFernCoordinator], SwitchEntity, RestoreEntity
-):
+class DuoFernAutomationSwitch(DuoFernEntity, SwitchEntity, RestoreEntity):
     """A DuoFern automation flag as an on/off SwitchEntity (CONFIG category).
 
     Appears in the device card's "Configuration" section — separate from
@@ -868,7 +845,6 @@ class DuoFernAutomationSwitch(
     """
 
     entity_description: DuoFernAutomationSwitchDescription
-    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -879,10 +855,17 @@ class DuoFernAutomationSwitch(
     ) -> None:
         super().__init__(coordinator)
         self._hex_code = hex_code
-        self._device_code = device_state.device_code
+        # Universalaktor (0x43): the command frame has to carry this entity's
+        # channel (FHEM: cc = chanNo), so the coordinator gets the channel-
+        # carrying code. Every other device keeps the plain 6-digit code.
+        self._device_code = (
+            device_state.device_code.with_channel(device_state.channel)
+            if device_state.device_code.device_type == 0x43 and device_state.channel
+            else device_state.device_code
+        )
         self.entity_description = description
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_{description.key}_auto"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
         # Fallback for readings that never come from the device (windowContact)
         self._restored_is_on: bool | None = None
 
@@ -975,15 +958,8 @@ class DuoFernAutomationSwitch(
     @callback
     def _handle_coordinator_update(self) -> None:
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()
 
 
@@ -992,7 +968,7 @@ class DuoFernAutomationSwitch(
 # ===========================================================================
 
 
-class DuoFernBoostSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
+class DuoFernBoostSwitch(DuoFernEntity, SwitchEntity):
     """Boost on/off for Heizkörperantrieb (0xE1) — identical in principle to
     manualMode / timeAutomatic: queued via _schedule_hsa_update("boostActive"),
     sent on the next device check-in, optimistic UI update via readings.
@@ -1002,7 +978,6 @@ class DuoFernBoostSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
     readings keeps this entity consistent with all other HSA switches.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "boost"
     _attr_icon = "mdi:radiator"
 
@@ -1016,7 +991,7 @@ class DuoFernBoostSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
         self._hex_code = hex_code
         self._device_code = device_state.device_code
         self._attr_unique_id = f"{DOMAIN}_{hex_code}_boost"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:
@@ -1150,12 +1125,11 @@ GRENZWERT_SWITCH_DESCRIPTIONS: tuple[DuoFernGrenzwertSwitchDescription, ...] = (
 )
 
 
-class DuoFernGrenzwertSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity):
+class DuoFernGrenzwertSwitch(DuoFernEntity, SwitchEntity):
     """Generic 'Aktiv'/'nutzen' toggle for whichever Grenzwert is currently
     selected in its trigger group (see DuoFernGrenzwertSelector in select.py).
     """
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
     def __init__(
@@ -1176,7 +1150,7 @@ class DuoFernGrenzwertSwitch(CoordinatorEntity[DuoFernCoordinator], SwitchEntity
         # kept on the dataclass only as documentation of the English default.
         self._attr_translation_key = description.translation_key
         self._attr_icon = description.icon
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, hex_code)})
+        self._attr_device_info = device_link(hex_code)
 
     @property
     def _device_state(self) -> DuoFernDeviceState | None:

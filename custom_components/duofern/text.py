@@ -1,7 +1,7 @@
 """Text platform for DuoFern.
 
 Provides a text input entity on the stick device card for entering a
-6-digit hex device code before triggering pair-by-code.
+6- or 10-digit hex device code before triggering pair-by-code.
 
 The text entity is read by DuoFernPairByCodeButton in button.py when
 the user presses the "Pair by Code" button.
@@ -18,23 +18,23 @@ GUI" section for the underlying data model.
 from __future__ import annotations
 
 import logging
-import re
 
 from homeassistant.components.text import TextEntity, TextMode
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator
+from .entity import DuoFernEntity, device_link
+from .protocol import validate_pair_code
 
 _LOGGER = logging.getLogger(__name__)
 
-# Pattern: exactly 6 hex characters (case-insensitive)
-DEVICE_CODE_PATTERN = r"^([0-9A-Fa-f]{6})?$"  # empty or exactly 6 hex chars
+# Pattern: empty, or 6 or 10 hex characters (case-insensitive). 10 digits =
+# 6-digit device code + 4-digit pairing password (devices since about 2020).
+DEVICE_CODE_PATTERN = r"^([0-9A-Fa-f]{6}([0-9A-Fa-f]{4})?)?$"
 
 
 async def async_setup_entry(
@@ -54,27 +54,26 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class DuoFernPairCodeText(CoordinatorEntity[DuoFernCoordinator], TextEntity):
-    """Text input for entering a 6-digit hex device code before pair-by-code.
+class DuoFernPairCodeText(DuoFernEntity, TextEntity):
+    """Text input for the 6- or 10-digit hex device code for pair-by-code.
 
     Appears on the stick device card alongside the "Pair by Code" button.
     The button reads the current value of this entity when pressed.
     """
 
-    _attr_has_entity_name = True
     _attr_translation_key = "pair_code_input"
     _attr_icon = "mdi:barcode"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = TextMode.TEXT
     _attr_native_min = 0  # empty string allowed as initial state
-    _attr_native_max = 6
+    _attr_native_max = 10
     _attr_pattern = DEVICE_CODE_PATTERN
 
     def __init__(self, coordinator: DuoFernCoordinator, system_code_hex: str) -> None:
         """Initialize the pair code text input."""
         super().__init__(coordinator)
         self._attr_unique_id = f"{DOMAIN}_{system_code_hex}_pair_code_input"
-        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, system_code_hex)})
+        self._attr_device_info = device_link(system_code_hex)
         self._current_value: str = ""
 
     @property
@@ -89,9 +88,10 @@ class DuoFernPairCodeText(CoordinatorEntity[DuoFernCoordinator], TextEntity):
         as a safety net and normalise to uppercase.
         """
         value = value.upper().strip()
-        if not re.match(r"^[0-9A-Fa-f]{6}$", value):
+        # An empty value clears the field (allowed by DEVICE_CODE_PATTERN).
+        if value and not validate_pair_code(value):
             _LOGGER.warning(
-                "Invalid device code entered: %r — must be exactly 6 hex characters",
+                "Invalid device code entered: %r - must be 6 or 10 hex characters",
                 value,
             )
             return

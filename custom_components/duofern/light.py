@@ -29,14 +29,13 @@ from homeassistant.components.light import (
     LightEntity,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
 from .coordinator import DuoFernCoordinator, DuoFernDeviceState
+from .entity import DuoFernEntity, device_description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,7 +72,7 @@ async def async_setup_entry(
         _LOGGER.info("Added %d DuoFern light entities", len(entities))
 
 
-class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
+class DuoFernLight(DuoFernEntity, LightEntity):
     """A DuoFern dimmer as a HA LightEntity with brightness control.
 
     Level 0-100 from DuoFern maps to brightness 0-255 in HA.
@@ -86,7 +85,6 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
       stairwellTime         — auto-off delay (seconds / 10)
     """
 
-    _attr_has_entity_name = True
     _attr_name = None
     _attr_color_mode = ColorMode.BRIGHTNESS
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
@@ -165,7 +163,9 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
         """
         if ATTR_BRIGHTNESS in kwargs:
             # Convert HA brightness (0-255) to DuoFern level (0-100)
-            level = round(kwargs[ATTR_BRIGHTNESS] * 100 / 255)
+            # Never below 1: brightness 1 would round to level 0, which
+            # switches the dimmer off instead of on.
+            level = max(1, round(kwargs[ATTR_BRIGHTNESS] * 100 / 255))
             await self.coordinator.async_set_level(self._device_code, level)
         else:
             await self.coordinator.async_switch_on(self._device_code)
@@ -182,26 +182,16 @@ class DuoFernLight(CoordinatorEntity[DuoFernCoordinator], LightEntity):
         """Return device info, including firmware version when available."""
         data = self.coordinator.data
         state = data.devices.get(self._hex_code) if data else None
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._hex_code)},
-            name=(f"DuoFern {self._device_code.device_type_name} ({self._hex_code})"),
-            manufacturer="Rademacher",
-            model=self._device_code.device_type_name,
-            serial_number=self._hex_code,
+        return device_description(
+            self.coordinator,
+            self._device_code,
+            self._hex_code,
             sw_version=state.status.version if state else None,
-            via_device_id=self.coordinator.stick_device_id,
         )
 
     @callback
     def _handle_coordinator_update(self) -> None:
         state = self._device_state
-        if state and state.status.version:
-            device_reg = dr.async_get(self.hass)
-            device = device_reg.async_get_device_by_identifier(
-                (DOMAIN, self._hex_code), self.coordinator.config_entry.entry_id
-            )
-            if device and device.sw_version != state.status.version:
-                device_reg.async_update_device(
-                    device.id, sw_version=state.status.version
-                )
+        if state:
+            self._sync_device_firmware(self._hex_code, state.status.version)
         self.async_write_ha_state()

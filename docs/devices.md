@@ -47,10 +47,10 @@ Full device support matrix and per-platform feature reference. See the [main REA
 
 | Description | Code | HA Platform | Tested |
 |-------------|------|-------------|:------:|
-| Bewegungsmelder | `0x65` | `binary_sensor`, `switch`, `number`, `button` | ❌ |
+| Bewegungsmelder | `0x65` | `binary_sensor`, `sensor`, `switch`, `number`, `button` | ❌ |
 | Rauchmelder | `0xAB` | `binary_sensor` | ✅ |
 | Fenster-Tür-Kontakt | `0xAC` | `binary_sensor` | ✅ |
-| Umweltsensor | `0x69` | `sensor`, `binary_sensor`, `number`, `select`, `switch`, `text`, `button` | ✅ |
+| Umweltsensor | `0x69` | `sensor`, `binary_sensor`, `cover`, `event`, `number`, `select`, `switch`, `button` | ✅ |
 | Sonnensensor | `0xA5` | `binary_sensor` | ✅ |
 | Sonnensensor (alt) | `0xAF` | `binary_sensor` | ❌ |
 | Sonnen-/Windsensor | `0xA9` | `binary_sensor` | ✅ |
@@ -83,9 +83,9 @@ Full device support matrix and per-platform feature reference. See the [main REA
 
 - **Open / Close / Stop** - standard movement commands
 - **Set Position** - move to any position (0-100 %)
-- **Dusk position button** - move to the device's programmed dusk position using the device's built-in speed profile. Equivalent to `set DEVICE dusk` in FHEM.
-- **Dawn position button** - move to the device's programmed dawn position. Equivalent to `set DEVICE dawn` in FHEM.
-- **Toggle button** - reverse current movement / change direction
+- **Dusk position button** - move to the device's programmed dusk position using the device's built-in speed profile. Equivalent to `set DEVICE dusk` in FHEM. Not for the SX5 (`0x4E`), FHEM has no such command for it.
+- **Dawn position button** - move to the device's programmed dawn position. Equivalent to `set DEVICE dawn` in FHEM. Not for the SX5.
+- **Toggle button** - reverse current movement / change direction. Not for the SX5.
 - **Push-based state updates** - position and moving state update in real time as status frames arrive
 - **All automation flags as entity attributes** - visible on the entity detail card and usable in automations:
   `dawnAutomatic`, `duskAutomatic`, `sunAutomatic`, `timeAutomatic`, `manualMode`, `sunMode`,
@@ -93,16 +93,16 @@ Full device support matrix and per-platform feature reference. See the [main REA
   `windMode`, `rainMode`, `windDirection`, `rainDirection`, `blindsMode`, `slatPosition`,
   `slatRunTime`, `tiltInSunPos`, `tiltInVentPos`, `reversal`, `motorDeadTime`, `runningTime`,
   and more - depending on device type and status format
-- **Obstacle / Block detection** - the Rohrmotor (`0x49`) and SX5 (`0x4E`) get dedicated `obstacle` and `block` binary sensor entities, usable directly as State triggers in automations. The SX5 additionally gets a `light_curtain` entity. Other cover types may support this too but are unverified - open an issue if your device reports obstacle/block in FHEM. No real frames available yet.
+- **Obstacle / Block detection** - the Rohrmotor (`0x49`) and SX5 (`0x4E`) get dedicated `obstacle` and `block` binary sensor entities, usable directly as State triggers in automations. The SX5 additionally gets a `light_curtain` entity. Other cover types may support this too but are unverified - open an issue if your device reports obstacle/block in FHEM. For those other types no real frames are available yet.
 - **RolloTron obstacle detection** - RolloTron Standard/Comfort Slave/Comfort Master (`0x40`/`0x41`/`0x61`) get a dedicated `obstacle` binary sensor entity, usable as a State trigger. Not part of FHEM - derived from real device frames on a Comfort Master (`0x61`). No `block` entity yet - no confirmed bit position for blockage detection on this device family.
 - **SX5 Light Curtain** - the SX5 garage door (0x4E) additionally gets a `light_curtain` binary sensor entity
-- **Firmware version** - shown in device info after first status frame
+- **Firmware version** - shown in device info after the first status frame, and kept across restarts
 - **Battery state** - shown as attribute where applicable
 
 ### Switch Entities (Universalaktor, Steckdosenaktor)
 
 - **On / Off** - standard switch commands
-- **Universalaktor (0x43)** - creates two separate switch entities (one per channel: 01 and 02), both grouped under the same device in HA
+- **Universalaktor (0x43)** - creates two separate devices in HA, one per channel, named e.g. `DuoFern Universalaktor (43AB12) Channel 01` and `... Channel 02`, each with its own switch entity. The same naming applies to the channels of the Umweltsensor, Bewegungsmelder and Wandtaster 6fach 230V
 - **All automation flags as attributes** - `dawnAutomatic`, `duskAutomatic`, `sunAutomatic`,
   `timeAutomatic`, `manualMode`, `sunMode`, `stairwellFunction`, `stairwellTime`, `modeChange`
 - **Bewegungsmelder (0x65) / Wandtaster 6fach 230V (0x74) - actor sub-channel "01"** - both devices
@@ -110,6 +110,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
   event sub-channel "00" (motion detection / button presses - see
   [Binary Sensor Entities](#binary-sensor-entities-motion-smoke-contact) and
   [Remote Control Event Entities](#remote-control-event-entities)):
+  - The actor sub-channel has to be paired with the stick separately from the event sub-channel, otherwise it does not react to commands from Home Assistant
   - **On / Off switch**, plus **Dusk / Dawn buttons** (see [Per-Device Buttons](#per-device-buttons))
   - **Stairwell Time number** (0-3200 s)
   - **Automation switches**: `dawnAutomatic`, `duskAutomatic`, `manualMode`, `sunAutomatic`,
@@ -153,7 +154,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
 - **Bewegungsmelder (0x65)** - `motion` device class, state updated via `duofern_event`; lives on sub-channel "00" (sub-channel "01" is a switch actor, see [Switch Entities](#switch-entities-universalaktor-steckdosenaktor))
 - **Rauchmelder (0xAB)** - `smoke` device class, state updated via `duofern_event`; battery level is persisted across HA restarts
 - **Fenster-Tür-Kontakt (0xAC)** - `opening` device class; two entities per device: `opened` and `tilted`
-- **Battery sensor** - battery-powered sensors (Bewegungsmelder `0x65`, Rauchmelder `0xAB`, Fenster-Tür-Kontakt `0xAC`) get a dedicated **Battery** diagnostic sensor entity (0-100 %) visible on the device card. The last known value persists across HA restarts. `battery_state` (ok/low) is exposed as an attribute on the battery entity
+- **Battery sensor** - Rauchmelder (`0xAB`) and Fenster-Tür-Kontakt (`0xAC`) get a dedicated **Battery** diagnostic sensor entity (0-100 %) visible on the device card. The Bewegungsmelder (`0x65`) is mains powered (230 V) and has none. The last known value persists across HA restarts. `battery_state` (ok/low) is exposed as an attribute on the battery entity
 
 ### Binary Sensor Entities (Obstacle & Block Detection)
 
@@ -209,11 +210,11 @@ One sensor entity per measurement, updated from the weather frame:
 - **Active-Grenzwerte sensors (Sun / Wind / Temperature)** - three sensors report which of the up to 5 configured trigger thresholds ("Grenzwerte") are currently active, as a comma-joined list (e.g. `"1,3"`), decoded from the sensorMsg channel bitmask. Use a template condition in automations to filter by a specific Grenzwert, e.g. `{{ '3' in states('sensor...wind_grenzwerte').split(',') }}` - or use the per-Grenzwert **device automation triggers** described below instead, which don't need a template.
 - **Dawn/Dusk event entity** - a single `Dawn/Dusk` event entity fires `dawn` or `dusk` when the corresponding sensorMsg (0713/0709) arrives; FHEM has no "end" message for these two, so they're a momentary event rather than a persistent sensor. Which Grenzwert(e) fired is included as event data (`grenzwerte: "1,3"`).
 - **Device Date / Device Time** - diagnostic sensors populated by pressing the **Get Time** button; reflect the Umweltsensor's own internal clock.
-- **Buttons** - **Get Weather**, **Get Time**, **Get Config**, **Write Config**, **Set Time** (pushes the current HA time to the device).
+- **Buttons** - **Get Weather**, **Get Time**, **Get Config**, **Write Config**, **Sync Time** (pushes the current HA time to the device), plus **Request Status**, **Remote Pair** / **Remote Unpair** / **Stop Remote (Un)Pairing** and **Reset Settings** / **Factory Reset** (once for the whole Umweltsensor, on this sub-channel).
 
 **Automation triggers for Sonne/Wind/Temperatur/Morgendämmerung/Abenddämmerung**: each of these five groups offers 5 (or 10, for the start/end pairs) dedicated device automation triggers - one per Grenzwert slot, clearly labelled e.g. "Wind Grenzwert 3 - Start", "Temperatur Grenzwert 1 - Überschritten", "Morgendämmerung Grenzwert 2 - Ausgelöst". Pick "Device" as the trigger type in the automation editor, select the Umweltsensor's weather-station device, then choose the specific Grenzwert/subtype combination from the dropdown - no template needed. Regen only has a flat Start/Ende trigger (no Grenzwert list, matching Homepilot's own single on/off toggle for rain).
 
-Config entities (read via **Get Config**, written to the device via the **Write Config** button):
+Config entities (read via **Get Config**, written to the device via the **Write Config** button). **Write Config** is refused until all 8 configuration pages have been read with **Get Config** since the integration was last loaded, so that no setting on the device is overwritten with zeros. After writing, the configuration is read back automatically:
 
 | Entity | Type | Description |
 |--------|------|-------------|
@@ -226,7 +227,7 @@ Config entities (read via **Get Config**, written to the device via the **Write 
 | Trigger Active | Switch | Enable/disable the currently selected Grenzwert slot (per group) |
 | Target Value (Wind speed / Temperature / Dawn brightness / Dusk brightness / Sun brightness / Sun detection delay / Shadow detection delay / Sun minimum temperature) | Number | The threshold value for the currently selected Grenzwert slot |
 | Sun Direction Target Angle / Width, Sun Height Target / Width | Select | Fixed, Homepilot-confirmed discrete options for the currently selected Sun Grenzwert slot |
-| Sun Link Temperature | Switch | Couples the Sun trigger to a minimum temperature ("Mit Temperatur verknüpfen") |
+| Sun Link Temperature | Switch | Couples the Sun trigger to a minimum temperature ("Mit Temperatur verknüpfen"). Switching it off clears the temperature on the device like FHEM does; HA remembers the last value until the next restart and writes it again when you switch it back on |
 
 #### Sub-Channel "01" - Actor
 
@@ -234,6 +235,7 @@ Behaves like a Rohrmotor/Troll cover output, driven by the sub-channel "00" trig
 
 | Entity | Type | Description |
 |--------|------|-------------|
+| Cover | Cover | Open / Close / Stop / Set Position, plus Dusk, Dawn and Toggle buttons |
 | Running Time | Number | Motor running time (0-100 s) |
 | Sun Position / Ventilating Position | Number | Target positions (0-100 %) |
 | Wind Direction / Rain Direction | Select | Movement direction (`up`/`down`) on wind/rain trigger |
@@ -244,15 +246,15 @@ Behaves like a Rohrmotor/Troll cover output, driven by the sub-channel "00" trig
 
 | Button | Devices | What it does |
 |--------|---------|-------------|
-| **Dusk position** | All covers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
-| **Dawn position** | All covers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
-| **Toggle** | All covers | Reverse current movement / change direction |
-| **Reset settings** | Covers, switches, dimmers, climate - except the Umweltsensor (0x69) and Bewegungsmelder/Wandtaster 6fach (0x65/0x74) actor sub-channels, which have no reset command | Reset device settings (keeps pairing) |
-| **Full reset** | Covers, switches, dimmers, climate - except the Umweltsensor (0x69) and Bewegungsmelder/Wandtaster 6fach (0x65/0x74) actor sub-channels, which have no reset command | Factory reset (loses pairing) |
-| **Remote pair** | All actuators | Initiate remote pairing |
-| **Remote unpair** | All actuators | Remove remote pairing |
-| **Stop remote pairing** | All actuators | End remote pair/unpair window early |
-| **Get status** | All actuators | Request current status from this device |
+| **Dusk position** | All covers except SX5, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dusk position |
+| **Dawn position** | All covers except SX5, dimmers, plus switch actors (Universalaktor, Steckdosenaktor, and the 0x65/0x74 actor sub-channel) | Move to stored dawn position |
+| **Toggle** | All covers except SX5 | Reverse current movement / change direction |
+| **Reset Settings** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Reset device settings (keeps pairing) |
+| **Factory Reset** | Covers, switches, dimmers, Raumthermostat. Once per physical device: on channel 01 of the Universalaktor (0x43) and on the "00" device of Umweltsensor (0x69), Bewegungsmelder (0x65) and Wandtaster 6fach 230V (0x74) | Factory reset (loses pairing) |
+| **Remote Pair** | All devices except remote controls and wall buttons (event channel), sun/wind sensors, Rauchmelder, Fenster-Tür-Kontakt, the motion channel of the Bewegungsmelder, and the Heizkörperantrieb | Initiate remote pairing |
+| **Remote Unpair** | Same devices as Remote Pair | Remove remote pairing |
+| **Stop Remote (Un)Pairing** | Same devices as Remote Pair | End remote pair/unpair window early |
+| **Request Status** | Same devices as Remote Pair | Request current status from this device |
 | **Activate Zone 1-4** | Raumthermostat (0x73) | Activate one of the four temperature threshold zones (`actTempLimit`) |
 
 ### Remote Control Event Entities
