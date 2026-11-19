@@ -1,5 +1,13 @@
 # Changelog
 
+## [v2.4.1]
+
+### Fixed
+- Heizkörperantrieb (`0xE1`): a setpoint of 28.0 °C was taken as boost, and from then on no lower setpoint from Home Assistant reached the device. The boost state was read from status byte 4 (`0xF0` = boost), but bits 0-5 of that byte are the desired temperature (FHEM statusId 180): a boost reports 28.0 °C (`0xF0`), and so does a normal setpoint of 28.0 °C. Seen with a climate controller that set 28.0 °C: Home Assistant showed boost on, queued every new setpoint but never sent it (in a boost frame only a boost off is sent), and showed the queued value as target temperature while the valve stayed at 100 %. The boost state is now read from bit 6 of status byte 12, which is set in every boost frame and clear without a boost, also at 28.0 °C (real frames of one actuator: boost from the device button `4E`/`CE`, setpoint 28.0 °C without boost `0E`, first frame after the boost `0E`). Bit 7 of the same byte is `forceResponse` (FHEM statusId 187), bits 0-5 the boost duration. Sending boost on/off is unchanged.
+- Heizkörperantrieb (`0xE1`): a setpoint changed during a boost was sent with change flag 0 on the first status frame after the boost, so the device ignored it and kept its previous setpoint while Home Assistant showed the new one. The comparison "has the device changed the value itself since the change was queued" used the readings after the boost handling had written the queued value into them, not the values reported by the device. The device values are now copied before any of that (`_handle_status()`). The same affected every frame in which the boost handling changes the readings.
+- Climate entities (`0x73`, `0xE1`): a setpoint of 4.0 °C is no longer shown as mode "Off". "Off" is now a mode of its own: it is only set by selecting "Off" in Home Assistant (which still sends 4.0 °C), it is kept across restarts, and it ends with "Heat", any new temperature from Home Assistant or a setpoint above 4.0 °C set on the device. "Heat" after "Off" restores the setpoint from before "Off" (20.0 °C if none is known); "Heat" without a previous "Off" sends nothing (before: 20.0 °C whenever the setpoint was 4.0 °C). A temperature call with `hvac_mode: off` now sets "Off". The status frame cannot tell "Off" and 4.0 °C apart, so an entity that showed "Off" before the update (setpoint 4.0 °C) starts as "Off".
+- Corrected comments and documentation of the `0xE1` status frame and `duoSetHSA`: byte 4 is the desired temperature, not a frame subtype, the bits 7-6 of byte 12 are not a rolling counter, and `setValue` is big-endian (the docstring of `build_hsa_command()` said little-endian; the frames were always built big-endian).
+
 ## [v2.4.0]
 
 ### Added

@@ -37,6 +37,7 @@ import logging
 from typing import Any
 
 from homeassistant.components.climate import (
+    ATTR_HVAC_MODE,
     ClimateEntity,
     ClimateEntityFeature,
     HVACAction,
@@ -46,7 +47,11 @@ from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import (
+    ExtraStoredData,
+    RestoredExtraData,
+    RestoreEntity,
+)
 
 from . import DuoFernConfigEntry
 from .const import DOMAIN
@@ -63,6 +68,10 @@ TEMP_MAX_HSA = 28.0
 # The wall thermostat GUI and original Rademacher app show 4-40°C.
 TEMP_MAX_THERMOSTAT = 40.0
 TEMP_STEP = 0.5
+# Setpoint used by "Heat" after "Off" when no setpoint from before "Off" is known.
+TEMP_HEAT_DEFAULT = 20.0
+# Key of the setpoint from before "Off" in the stored extra data.
+_EXTRA_SETPOINT_BEFORE_OFF = "setpoint_before_off"
 
 _SKIP_AS_ATTRIBUTE = {"desired-temp", "measured-temp", "measured-temp2"}
 
@@ -103,8 +112,14 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
     """A DuoFern thermostat or radiator valve as a HA ClimateEntity.
 
     Supports HEAT and OFF modes:
-      HEAT: device is controlling temperature (normal operation)
-      OFF:  desired-temp at minimum (4.0°C); manualMode is not changed
+      HEAT: device is controlling temperature (normal operation). A setpoint
+            of 4.0°C is a normal setpoint in this mode.
+      OFF:  only after "Off" was selected in HA. Sends desired-temp 4.0°C
+            (minimum); manualMode is not changed. The status frame cannot
+            tell "Off" from a setpoint of 4.0°C, so the mode is kept by the
+            entity (restored after a restart). It ends with "Heat", any new
+            temperature from HA, or a setpoint above 4.0°C reported by the
+            device (dial, Homepilot).
 
     From 30_DUOFERN.pm %setsThermostat:
       desired-temp:$tempSetList  — 4.0-28.0°C (0xE1), 4.0-40.0°C (0x73)
@@ -145,6 +160,15 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
         # Never sent to the device; overwritten by coordinator updates.
         self._restored_desired_temp: float | None = None
         self._restored_measured_temp: float | None = None
+        # "Off" selected in HA (see class docstring) and the setpoint that was
+        # active before, restored by "Heat".
+        self._hvac_off: bool = False
+        self._setpoint_before_off: float | None = None
+        # True once the device state shows the minimum setpoint after "Off"
+        # was selected. Only then a higher setpoint ends "Off"; before that
+        # the state still carries the setpoint from before the command (0x73
+        # has no optimistic update, see coordinator.async_set_desired_temp).
+        self._off_confirmed: bool = False
 
     async def async_added_to_hass(self) -> None:
         """Restore last known temperatures so the GUI shows values immediately.
@@ -158,6 +182,14 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
         last_state = await self.async_get_last_state()
         if last_state is None:
             return
+        self._hvac_off = last_state.state == HVACMode.OFF
+        self._off_confirmed = self._hvac_off
+        if (extra := await self.async_get_last_extra_data()) is not None:
+            try:
+                if (v := extra.as_dict().get(_EXTRA_SETPOINT_BEFORE_OFF)) is not None:
+                    self._setpoint_before_off = float(v)
+            except (TypeError, ValueError):
+                pass
         attrs = last_state.attributes
         try:
             if (v := attrs.get("temperature")) is not None:
@@ -215,17 +247,10 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
     def hvac_mode(self) -> HVACMode:
         """Return current HVAC mode.
 
-        Derived exclusively from live device data (state.status.desired_temp),
-        NOT from the restored fallback (self._restored_desired_temp).
-        Reason: the default restored value is TEMP_MIN (4.0°C), which would
-        incorrectly show HVACMode.OFF on startup even if the device is actively
-        heating. We return HEAT as the safe default until a live frame arrives.
+        OFF only after "Off" was selected in HA (see class docstring). A
+        setpoint of 4.0°C reported by the device is HEAT.
         """
-        state = self._device_state
-        if state is not None and state.status.desired_temp is not None:
-            if state.status.desired_temp <= TEMP_MIN:
-                return HVACMode.OFF
-        return HVACMode.HEAT
+        return HVACMode.OFF if self._hvac_off else HVACMode.HEAT
 
     @property
     def hvac_action(self) -> HVACAction | None:
@@ -271,35 +296,54 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set the desired temperature.
 
-        Sends a DuoFern command to the device. The actual protocol for
-        the HSA is bidirectional (helper{HSAold} in FHEM), but a simpler
-        approach works: send desired-temp as a level command and wait for
-        the next status response to confirm.
+        0xE1: the change is queued and sent with duoSetHSA when the device
+        sends its next status frame (see coordinator.async_set_desired_temp).
+        0x73: sent immediately with the desired-temp command.
+        A new temperature ends "Off". If the call also asks for hvac_mode
+        "off", "Off" is set instead and the temperature is ignored.
 
         From 30_DUOFERN.pm %setsThermostat:
           desired-temp:$tempSetList (4.0-28.0°C for 0xE1, 4.0-40.0°C for 0x73)
         """
+        if kwargs.get(ATTR_HVAC_MODE) == HVACMode.OFF:
+            await self.async_set_hvac_mode(HVACMode.OFF)
+            return
         temp = kwargs.get(ATTR_TEMPERATURE)
         if temp is None:
             return
         temp = max(
             TEMP_MIN, min(self._attr_max_temp, round(temp / TEMP_STEP) * TEMP_STEP)
         )
+        self._hvac_off = False
         await self.coordinator.async_set_desired_temp(self._device_code, temp)
+        self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set HVAC mode.
 
-        OFF  -> set desired-temp to minimum (4°C)
-        HEAT -> set desired-temp to a reasonable default (20°C) if currently off
+        OFF  -> remember the current setpoint, set desired-temp to minimum (4°C)
+        HEAT -> only when "Off": restore the setpoint from before "Off"
+                (20°C if none is known). Without "Off" nothing is sent.
         """
         if hvac_mode == HVACMode.OFF:
-            await self.async_set_temperature(**{ATTR_TEMPERATURE: TEMP_MIN})
-        elif hvac_mode == HVACMode.HEAT:
-            state = self._device_state
-            current = state.status.desired_temp if state else None
-            if current is None or current <= TEMP_MIN:
-                await self.async_set_temperature(**{ATTR_TEMPERATURE: 20.0})
+            if not self._hvac_off:
+                self._setpoint_before_off = self.native_target_temperature
+                self._off_confirmed = False
+            self._hvac_off = True
+            await self.coordinator.async_set_desired_temp(self._device_code, TEMP_MIN)
+            self.async_write_ha_state()
+        elif hvac_mode == HVACMode.HEAT and self._hvac_off:
+            temp = self._setpoint_before_off
+            if temp is None:
+                temp = TEMP_HEAT_DEFAULT
+            await self.async_set_temperature(**{ATTR_TEMPERATURE: temp})
+
+    @property
+    def extra_restore_state_data(self) -> ExtraStoredData:
+        """Store the setpoint from before "Off" across restarts."""
+        return RestoredExtraData(
+            {_EXTRA_SETPOINT_BEFORE_OFF: self._setpoint_before_off}
+        )
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -318,4 +362,14 @@ class DuoFernClimate(DuoFernEntity, ClimateEntity, RestoreEntity):
         state = self._device_state
         if state:
             self._sync_device_firmware(self._hex_code, state.status.version)
+            # A setpoint above the minimum set on the device (dial, Homepilot)
+            # ends "Off", but only after the minimum has been seen once and
+            # not while an HSA change is still queued: until then the state
+            # can still carry the setpoint from before "Off".
+            desired = state.status.desired_temp
+            if self._hvac_off and desired is not None:
+                if desired <= TEMP_MIN:
+                    self._off_confirmed = True
+                elif self._off_confirmed and "desired-temp" not in state.hsa_pending:
+                    self._hvac_off = False
         self.async_write_ha_state()

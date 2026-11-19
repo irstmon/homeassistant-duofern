@@ -12,6 +12,8 @@ Technical reference for the DuoFern serial protocol as implemented by this integ
 - **Push-based updates**: Devices send status frames proactively; coordinator calls `async_set_updated_data()` on each received frame
 - **Position convention**: DuoFern 0 = open / 100 = closed; HA 0 = closed / 100 = open (inverted transparently)
 - **HSA (Heizkörperantrieb)**: Device-initiated bidirectional protocol - changes are queued and transmitted only when the device checks in with a status frame, matching FHEM's `%commandsHSA` / `HSAold` implementation
+- **HSA status frame** (format `29`): byte 4 bits 0-5 = desired-temp (raw `(r+8)/2` °C; during a boost the device reports 28.0 °C, byte 4 = `0xF0`, the same as a normal setpoint of 28.0 °C); byte 12: bit 7 = `forceResponse`, bit 6 = boost active, bits 0-5 = boost duration in minutes. Boost is detected from byte 12 bit 6 only
+- **duoSetHSA**: `0D 01 1D 80 nn nn nn 00..00 [device code] 00`, `nnnnnn` = 24-bit `setValue`, big-endian (desired-temp raw `(t-4)/0.5` in bits 17-22, change flag bit 23). A change is sent with change flag 1 only if the device still reports the value it had when the change was queued
 - **Boost frame layout** (OTA-verified via rtl_433):
   - ON: `f[8] = 0x40 | duration_min` (only if duration changed, else `0x00`), `f[11] = 0x03`; `sv` contains desired-temp only if it was changed, else `0x000000`
   - OFF: `f[8] = 0x00`, `f[11] = 0x02` (critical - `0x00` is silently ignored by the device)

@@ -130,7 +130,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
 
 - **Target temperature** - set desired temperature (4.0-28.0 °C for HSA and 4.0-40.0 °C for Raumthermostat in 0.5 °C steps)
 - **Current temperature** - measured temperature from the device
-- **HVAC modes** - HEAT and OFF
+- **HVAC modes** - HEAT and OFF. OFF sends the minimum of 4.0 °C, but a setpoint of 4.0 °C is not OFF: OFF is set only by selecting it, kept across restarts, and ended by HEAT, a new target temperature or a setpoint above 4.0 °C set on the device. HEAT after OFF restores the setpoint from before OFF (20.0 °C if none is known)
 - **All readings as attributes** - `temperatureThreshold1-4`, `actTempLimit`, `output`,
   `manualMode`, `timeAutomatic`; for the Heizkörperantrieb additionally: `sendingInterval`
 - **Manual Mode / Time Automatic switches** - `manualMode` and `timeAutomatic` are exposed as
@@ -144,7 +144,7 @@ Full device support matrix and per-platform feature reference. See the [main REA
 - **Battery sensor** - dedicated diagnostic sensor entity for the Heizkörperantrieb (`0xE1`), reads `batteryPercent` from the status frame and persists the last known value across restarts
 - **Window Open Signal switch** - tells the Heizkörperantrieb a window is open, immediately forcing the valve to the setback temperature (4 °C). The switch reflects the **live device state** - the device echoes the last-set value back in every status frame
 - **Boost Mode** - rapidly heats a room by fully opening the valve for a configurable duration:
-  - **Boost switch** - activates / deactivates boost mode
+  - **Boost switch** - activates / deactivates boost mode. Shows the boost bit of the status frame, so a boost started on the device is shown too; a normal setpoint of 28 °C is not a boost
   - **Boost Duration number** (4-60 min) - configure the duration before activating; moving the slider alone sends nothing to the device
   - **Boost Started sensor** (timestamp) - shows when the last boost was activated, rendered by HA as "13 minutes ago"; persists across restarts
 - **Values restored on startup** - all `0xE1` entities (climate temperatures, valve position, sending interval, boost duration) show their last known values immediately after HA restarts. Battery devices can take several minutes before their first status frame - no more `unknown` on the device card

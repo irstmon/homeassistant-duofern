@@ -6,8 +6,10 @@ with guards around boost on/off (no receive window on the first frame after
 a change). The sequences below fix the behaviour that was worked out from
 radio captures and confirmed on a real actuator.
 
-Frames: D = status with boost off (real frame of E14A0F), F = the same frame
-with the boost bit set.
+Frames: D = status with boost off (real frame of E14A0F, setpoint 14.0),
+F = the same frame as the device sends it during a boost: boost bit (byte 12,
+bit 6) set and desired-temp 28.0 (byte 4 = 0xF0). F28 = setpoint 28.0 without
+a boost (byte 4 = 0xF0, boost bit clear).
 """
 
 from __future__ import annotations
@@ -34,7 +36,8 @@ from .common import (
 CODE = "E14A0F"
 DEVICE = DuoFernId.from_hex(CODE)
 D = "0FFF0F29D40917008042642A04140AE14A0F6F5C7E01"
-F = "0FFF0F29F00917008042642A04140AE14A0F6F5C7E01"
+F = "0FFF0F29F00917008042642A44140AE14A0F6F5C7E01"
+F28 = "0FFF0F29F00917008042642A04140AE14A0F6F5C7E01"
 CC = stick_ack("810003CC", CODE)
 AA = stick_ack("810108AA", CODE)
 BB = stick_ack("810100BB", CODE)
@@ -54,6 +57,9 @@ BOOST_ON = "0D011D80000000004E000003000000000000E14A0F00"
 BOOST_OFF = "0D011D800000000000000002000000000000E14A0F00"
 MANUAL_ON = "0D011D800005000000000000000000000000E14A0F00"
 EMPTY_REPLY = "0D011D800000000000000000000000000000E14A0F00"
+SET_TEMP_28 = "0D011D80E000000000000000000000000000E14A0F00"
+SET_TEMP_17 = "0D011D80B400000000000000000000000000E14A0F00"
+SET_TEMP_15_5 = "0D011D80AE00000000000000000000000000E14A0F00"
 
 
 @asynccontextmanager
@@ -233,4 +239,58 @@ async def test_boost_and_setpoint_pending_go_out_in_one_frame(
         assert frame[18:21] == bytes.fromhex(CODE)
         assert sent[0] != BOOST_ON  # carries the setpoint in addition
         assert s.snapshot()[2] == []  # everything was sent
+        await unload_entry(hass, entry)
+
+
+async def test_setpoint_28_is_not_a_boost(hass: HomeAssistant) -> None:
+    """A setpoint of 28.0 gives byte 4 = 0xF0 like a boost frame. Without the
+    boost bit it is a normal status frame: queued changes are sent.
+
+    Before 2.4.1 such frames were taken as boost and a lower setpoint was
+    never sent (real case 2026-11-19, setpoint 28.0 set by a climate
+    controller)."""
+    async with _hsa_environment():
+        s, entry = await _start(hass)
+        c = s.coordinator
+
+        assert await s.step(frame=D) == []
+        assert await s.step(call=c.async_set_desired_temp(DEVICE, 28.0)) == []
+        assert await s.step(frame=D) == [SET_TEMP_28]
+        assert await s.step(frame=CC) == []
+
+        assert await s.step(frame=F28) == []
+        assert s.state.status.boost_active is False
+        assert s.snapshot() == ("off", 28.0, [], False, False, False)
+
+        assert await s.step(call=c.async_set_desired_temp(DEVICE, 17.0)) == []
+        assert await s.step(frame=F28) == [SET_TEMP_17]
+        assert s.snapshot() == ("off", 17.0, [], False, False, False)
+        await unload_entry(hass, entry)
+
+
+async def test_setpoint_queued_during_boost_is_sent_with_change_flag(
+    hass: HomeAssistant,
+) -> None:
+    """A setpoint changed during a boost is sent after the boost with
+    changeFlag 1. The device still reports the setpoint from before the
+    boost, which is the value the change was queued against.
+
+    Before 2.4.1 the comparison used the readings after the boost handling
+    had written the queued value into them: changeFlag 0, the device kept its
+    old setpoint (real case 2026-11-19)."""
+    async with _hsa_environment():
+        s, entry = await _start(hass)
+        c = s.coordinator
+
+        assert await s.step(frame=D) == []
+        # boost started on the device: nothing is sent during the boost
+        assert await s.step(frame=F) == []
+        assert s.snapshot() == ("on", 14.0, [], False, False, False)
+        assert await s.step(call=c.async_set_desired_temp(DEVICE, 15.5)) == []
+        assert await s.step(frame=F) == []
+        assert s.snapshot() == ("on", 15.5, ["desired-temp"], False, False, False)
+
+        # boost ended: first status frame carries the old setpoint 14.0
+        assert await s.step(frame=D) == [SET_TEMP_15_5]
+        assert s.snapshot() == ("off", 15.5, [], False, False, False)
         await unload_entry(hass, entry)

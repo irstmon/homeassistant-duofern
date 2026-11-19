@@ -791,7 +791,7 @@ class DuoFernBoostStartSensor(DuoFernEntity, SensorEntity, RestoreEntity):
     """Timestamp sensor: when was the last boost started?
 
     Set in the coordinator when boost transitions from inactive → active
-    (first 0xF0 frame after a 0xD4/0xE0 frame).
+    (first status frame with the boost bit set after one without it).
 
     Uses RestoreEntity so the last known start time survives HA restarts.
     HA renders datetime sensors as relative time: "vor 13 Minuten".

@@ -1297,14 +1297,18 @@ def test_parse_status_blindsmode_on_keeps_blind_readings():
 
 
 def _make_fmt29_frame(boost_active: bool = False, boost_dur: int = 0) -> bytearray:
-    """Build a format 29 (HSA) status frame."""
+    """Build a format 29 (HSA) status frame.
+
+    During a boost the device sets bit 6 of byte 12 and reports desired-temp
+    28.0 (byte 4 = 0xF0).
+    """
     buf = bytearray(22)
     buf[0] = 0x0F
     buf[1] = 0xFF
     buf[2] = 0x0F
     buf[3] = 0x29  # format 29
     buf[4] = 0xF0 if boost_active else 0x00
-    buf[12] = boost_dur & 0x3F
+    buf[12] = (boost_dur & 0x3F) | (0x40 if boost_active else 0x00)
     buf[15] = 0xE1  # HSA device type
     buf[16] = 0x12
     buf[17] = 0x34
@@ -1312,7 +1316,7 @@ def _make_fmt29_frame(boost_active: bool = False, boost_dur: int = 0) -> bytearr
 
 
 def test_parse_status_format29_boost_active_true():
-    """frame[4]=0xF0 → boost_active=True and readings['boostActive']='on'."""
+    """byte 12 bit 6 → boost_active=True and readings['boostActive']='on'."""
     buf = _make_fmt29_frame(boost_active=True, boost_dur=21)
     result = DuoFernDecoder.parse_status(buf)
     assert result.boost_active is True
@@ -1326,6 +1330,38 @@ def test_parse_status_format29_boost_active_false():
     result = DuoFernDecoder.parse_status(buf)
     assert result.boost_active is False
     assert result.readings["boostActive"] == "off"
+
+
+# Real frames of one Heizkörperantrieb (2026-11-19), device code replaced.
+# byte 4: desired-temp (bits 0-5); byte 12: bit 7 forceResponse, bit 6 boost,
+# bits 0-5 boost duration.
+HSA_SETPOINT_28_NO_BOOST = "0FFF0F29F0075C00824064240E1618E1ABCD6F5C7E01"
+HSA_BEFORE_BOOST_FORCE = "0FFF0F29D9075C00824015248E1618E1ABCD6F5C7E01"
+HSA_BOOST = "0FFF0F29F0076E00824010244E1618E1ABCD6F5C7E01"
+HSA_BOOST_FORCE = "0FFF0F29F0076E0082406424CE1618E1ABCD6F5C7E01"
+HSA_AFTER_BOOST = "0FFF0F29D907AB00824064240E1618E1ABCD6F5C7E01"
+
+
+@pytest.mark.parametrize(
+    ("frame", "boost", "desired", "force", "valve"),
+    [
+        (HSA_SETPOINT_28_NO_BOOST, False, 28.0, 0, 100),
+        (HSA_BEFORE_BOOST_FORCE, False, 16.5, 1, 21),
+        (HSA_BOOST, True, 28.0, 0, 16),
+        (HSA_BOOST_FORCE, True, 28.0, 1, 100),
+        (HSA_AFTER_BOOST, False, 16.5, 0, 100),
+    ],
+)
+def test_parse_status_format29_real_frames(frame, boost, desired, force, valve):
+    """Boost comes from byte 12 bit 6; a setpoint of 28.0 alone is no boost."""
+    result = DuoFernDecoder.parse_status(bytearray.fromhex(frame))
+    assert result.boost_active is boost
+    assert result.readings["boostActive"] == ("on" if boost else "off")
+    assert result.desired_temp == desired
+    assert result.readings["forceResponse"] == force
+    assert result.readings["valvePosition"] == valve
+    assert result.boost_duration_min == 14
+    assert result.version == "1.6"
 
 
 def test_parse_status_format29_version_from_readings():
