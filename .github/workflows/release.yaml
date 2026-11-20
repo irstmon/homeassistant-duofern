@@ -8,14 +8,19 @@ on:
         required: true
         type: string
       prerelease:
-        description: "Preview release (mark as pre-release, don't update main or bump for next version)"
+        description: "Preview release (mark as pre-release, not as latest)"
         required: false
         type: boolean
         default: false
+      check_version:
+        description: "Check that RELEASE_NOTES.md header matches the version"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   release:
-    name: Bump version, tag, and create release
+    name: Set version, tag, and create release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -33,6 +38,19 @@ jobs:
           echo "Release notes:"
           cat RELEASE_NOTES.md
 
+      # Guards against publishing the notes of the previous release again,
+      # since RELEASE_NOTES.md is no longer reset after a release.
+      - name: Check release notes version
+        if: ${{ inputs.check_version }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          notes_header=$(head -n 1 RELEASE_NOTES.md)
+          if [ "$notes_header" != "# Release v$VERSION" ]; then
+            echo "::error::RELEASE_NOTES.md header is '$notes_header', expected '# Release v$VERSION'."
+            exit 1
+          fi
+
       - name: Update manifest.json version
         run: |
           jq --arg v "${{ inputs.version }}" \
@@ -40,18 +58,14 @@ jobs:
             custom_components/duofern/manifest.json > tmp.json \
             && mv tmp.json custom_components/duofern/manifest.json
 
-      - name: Commit version bump
+      # The version bump is committed locally only and never pushed to the
+      # branch. It is published solely through the tag below.
+      - name: Commit version bump locally
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add custom_components/duofern/manifest.json
           git diff --cached --quiet || git commit -m "chore: bump version to ${{ inputs.version }}"
-
-      # Preview releases are tagged from a local commit that is never pushed to
-      # main, so they don't consume the "official" version bump.
-      - name: Push version bump
-        if: ${{ inputs.prerelease != true }}
-        run: git push
 
       - name: Create git tag
         run: |
@@ -72,18 +86,3 @@ jobs:
           files: duofern.zip
           prerelease: ${{ inputs.prerelease }}
           make_latest: ${{ inputs.prerelease == true && 'false' || 'true' }}
-
-      - name: Prepare RELEASE_NOTES.md for next release
-        if: ${{ inputs.prerelease != true }}
-        run: |
-          # Increment the patch version (e.g. 2.2.4 -> 2.2.5)
-          IFS='.' read -r major minor patch <<< "${{ inputs.version }}"
-          next_version="${major}.${minor}.$((patch + 1))"
-          printf "# Release v%s\n\n" "$next_version" > RELEASE_NOTES.md
-
-      - name: Commit next release notes
-        if: ${{ inputs.prerelease != true }}
-        run: |
-          git add RELEASE_NOTES.md
-          git diff --cached --quiet || git commit -m "chore: prepare RELEASE_NOTES.md for next release"
-          git push
