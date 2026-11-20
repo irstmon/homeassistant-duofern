@@ -4,11 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g. 2.2.1)"
+        description: "Release version without suffix (e.g. 2.2.1)"
         required: true
         type: string
       prerelease:
-        description: "Preview release (mark as pre-release, not as latest)"
+        description: "Preview release (appends -preN automatically, marks as pre-release, not as latest)"
         required: false
         type: boolean
         default: false
@@ -40,6 +40,7 @@ jobs:
 
       # Guards against publishing the notes of the previous release again,
       # since RELEASE_NOTES.md is no longer reset after a release.
+      # Pre-releases use the header of the base version (e.g. "# Release v2.4.1").
       - name: Check release notes version
         if: ${{ inputs.check_version }}
         env:
@@ -51,9 +52,37 @@ jobs:
             exit 1
           fi
 
+      # Final release: X.Y.Z. Pre-release: X.Y.Z-preN, where N is one higher
+      # than the highest existing vX.Y.Z-preN tag on the remote (starts at 1).
+      - name: Determine release version
+        id: ver
+        env:
+          VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '$VERSION' must have the form X.Y.Z (no 'v', no suffix)."
+            exit 1
+          fi
+          tags=$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##')
+          if grep -qx "v$VERSION" <<< "$tags"; then
+            echo "::error::Tag v$VERSION already exists."
+            exit 1
+          fi
+          if [ "$PRERELEASE" = "true" ]; then
+            escaped=${VERSION//./\\.}
+            last=$(grep -E "^v${escaped}-pre[0-9]+$" <<< "$tags" \
+              | sed -E 's/.*-pre([0-9]+)$/\1/' | sort -n | tail -n 1)
+            release_version="$VERSION-pre$(( ${last:-0} + 1 ))"
+          else
+            release_version="$VERSION"
+          fi
+          echo "Release version: $release_version"
+          echo "release_version=$release_version" >> "$GITHUB_OUTPUT"
+
       - name: Update manifest.json version
         run: |
-          jq --arg v "${{ inputs.version }}" \
+          jq --arg v "${{ steps.ver.outputs.release_version }}" \
             '.version = $v' \
             custom_components/duofern/manifest.json > tmp.json \
             && mv tmp.json custom_components/duofern/manifest.json
@@ -65,12 +94,12 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add custom_components/duofern/manifest.json
-          git diff --cached --quiet || git commit -m "chore: bump version to ${{ inputs.version }}"
+          git diff --cached --quiet || git commit -m "chore: bump version to ${{ steps.ver.outputs.release_version }}"
 
       - name: Create git tag
         run: |
-          git tag "v${{ inputs.version }}"
-          git push origin "v${{ inputs.version }}"
+          git tag "v${{ steps.ver.outputs.release_version }}"
+          git push origin "v${{ steps.ver.outputs.release_version }}"
 
       - name: Build ZIP asset
         run: |
@@ -80,8 +109,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "v${{ inputs.version }}"
-          name: "v${{ inputs.version }}"
+          tag_name: "v${{ steps.ver.outputs.release_version }}"
+          name: "v${{ steps.ver.outputs.release_version }}"
           body_path: RELEASE_NOTES.md
           files: duofern.zip
           prerelease: ${{ inputs.prerelease }}
