@@ -59,6 +59,8 @@ def _make_climate(hex_code: str) -> tuple[DuoFernClimate, DuoFernDeviceState]:
         device_state=device_state,
         hex_code=hex_code,
     )
+    climate.async_write_ha_state = MagicMock()
+    climate.async_get_last_extra_data = AsyncMock(return_value=None)
     return climate, device_state
 
 
@@ -172,11 +174,11 @@ def test_hvac_mode_heat_when_desired_temp_none():
     assert climate.hvac_mode == HVACMode.HEAT
 
 
-def test_hvac_mode_off_when_desired_temp_at_min():
-    """HVACMode.OFF when desired_temp <= TEMP_MIN."""
+def test_hvac_mode_heat_when_desired_temp_at_min():
+    """A setpoint of 4.0 °C reported by the device is HEAT, not OFF."""
     climate, device_state = _make_climate(THERMOSTAT_HEX)
     device_state.status.desired_temp = TEMP_MIN
-    assert climate.hvac_mode == HVACMode.OFF
+    assert climate.hvac_mode == HVACMode.HEAT
 
 
 def test_hvac_mode_heat_when_temp_above_min():
@@ -316,35 +318,113 @@ async def test_set_hvac_mode_off_sets_temp_to_min():
     )
 
 
-async def test_set_hvac_mode_heat_when_currently_off_sends_20():
-    """HVACMode.HEAT when desired_temp <= TEMP_MIN → sends 20.0°C."""
-    from custom_components.duofern.climate import TEMP_MIN
-
+async def test_set_hvac_mode_off_is_off_until_heat():
+    """OFF is kept by the entity: 4.0 °C from the device does not end it."""
     climate, device_state = _make_climate(THERMOSTAT_HEX)
-    device_state.status.desired_temp = TEMP_MIN  # currently at minimum = OFF
+    climate._sync_device_firmware = MagicMock()
+    device_state.status.desired_temp = 21.0
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    assert climate.hvac_mode == HVACMode.OFF
+    device_state.status.desired_temp = TEMP_MIN
+    climate._handle_coordinator_update()
+    assert climate.hvac_mode == HVACMode.OFF
+
+
+async def test_set_hvac_mode_heat_after_off_restores_setpoint():
+    """HEAT after OFF sends the setpoint from before OFF."""
+    climate, device_state = _make_climate(THERMOSTAT_HEX)
+    device_state.status.desired_temp = 21.5
     device_id = DuoFernId.from_hex(THERMOSTAT_HEX)
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    device_state.status.desired_temp = TEMP_MIN
+    climate.coordinator.async_set_desired_temp.reset_mock()
     await climate.async_set_hvac_mode(HVACMode.HEAT)
     climate.coordinator.async_set_desired_temp.assert_called_once_with(
-        device_id, 20.0
+        device_id, 21.5
     )
+    assert climate.hvac_mode == HVACMode.HEAT
 
 
-async def test_set_hvac_mode_heat_when_already_heating_does_nothing():
-    """HVACMode.HEAT when desired_temp > TEMP_MIN → no command sent."""
+async def test_set_hvac_mode_off_twice_keeps_setpoint_before_off():
     climate, device_state = _make_climate(THERMOSTAT_HEX)
-    device_state.status.desired_temp = 21.0  # already heating
+    device_state.status.desired_temp = 19.0
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    device_state.status.desired_temp = TEMP_MIN
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    assert climate._setpoint_before_off == 19.0
+
+
+async def test_set_hvac_mode_heat_when_device_at_min_does_nothing():
+    """HEAT without a previous OFF sends nothing, also at 4.0 °C."""
+    climate, device_state = _make_climate(THERMOSTAT_HEX)
+    device_state.status.desired_temp = TEMP_MIN
     await climate.async_set_hvac_mode(HVACMode.HEAT)
     climate.coordinator.async_set_desired_temp.assert_not_called()
 
 
-async def test_set_hvac_mode_heat_when_desired_temp_unknown_sends_default():
-    """HVACMode.HEAT without a known setpoint sends the 20 °C default."""
+async def test_set_hvac_mode_heat_after_off_without_setpoint_sends_default():
+    """HEAT after OFF without a known setpoint sends the 20 °C default."""
     climate, device_state = _make_climate(THERMOSTAT_HEX)
     device_state.status.desired_temp = None  # no live data
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    climate.coordinator.async_set_desired_temp.reset_mock()
     await climate.async_set_hvac_mode(HVACMode.HEAT)
     climate.coordinator.async_set_desired_temp.assert_called_once_with(
         DuoFernId.from_hex(THERMOSTAT_HEX), 20.0
     )
+
+
+async def test_set_temperature_ends_off():
+    climate, device_state = _make_climate(THERMOSTAT_HEX)
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    await climate.async_set_temperature(temperature=4.0)
+    assert climate.hvac_mode == HVACMode.HEAT
+
+
+async def test_set_temperature_with_hvac_mode_off_sets_off():
+    climate, _ = _make_climate(THERMOSTAT_HEX)
+    await climate.async_set_temperature(temperature=21.0, hvac_mode=HVACMode.OFF)
+    assert climate.hvac_mode == HVACMode.OFF
+    climate.coordinator.async_set_desired_temp.assert_called_once_with(
+        DuoFernId.from_hex(THERMOSTAT_HEX), TEMP_MIN
+    )
+
+
+async def test_off_ends_when_device_reports_higher_setpoint():
+    """A setpoint above 4.0 °C from the device (dial) ends OFF, but only
+    after the device has shown 4.0 °C once (0x73 has no optimistic update)."""
+    climate, device_state = _make_climate(THERMOSTAT_HEX)
+    climate._sync_device_firmware = MagicMock()
+    device_state.status.desired_temp = 21.0
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    climate._handle_coordinator_update()  # state still 21.0: command not applied yet
+    assert climate.hvac_mode == HVACMode.OFF
+    device_state.status.desired_temp = TEMP_MIN
+    climate._handle_coordinator_update()
+    assert climate.hvac_mode == HVACMode.OFF
+    device_state.status.desired_temp = 18.0
+    climate._handle_coordinator_update()
+    assert climate.hvac_mode == HVACMode.HEAT
+
+
+async def test_off_kept_while_hsa_change_is_queued():
+    climate, device_state = _make_climate(HSA_HEX)
+    climate._sync_device_firmware = MagicMock()
+    device_state.status.desired_temp = TEMP_MIN
+    await climate.async_set_hvac_mode(HVACMode.OFF)
+    climate._handle_coordinator_update()
+    device_state.hsa_pending["desired-temp"] = (16.5, TEMP_MIN)
+    device_state.status.desired_temp = 16.5
+    climate._handle_coordinator_update()
+    assert climate.hvac_mode == HVACMode.OFF
+
+
+def test_extra_restore_state_data_holds_setpoint_before_off():
+    climate, _ = _make_climate(THERMOSTAT_HEX)
+    climate._setpoint_before_off = 22.0
+    assert climate.extra_restore_state_data.as_dict() == {
+        "setpoint_before_off": 22.0
+    }
 
 
 @pytest.mark.parametrize(
@@ -353,12 +433,17 @@ async def test_set_hvac_mode_heat_when_desired_temp_unknown_sends_default():
         (None, 21.0, None),
         ("on", 21.0, HVACAction.HEATING),
         ("off", 21.0, HVACAction.IDLE),
-        ("off", 4.0, HVACAction.OFF),
+        ("off", 4.0, HVACAction.IDLE),
+        ("off", "hvac_off", HVACAction.OFF),
+        ("on", "hvac_off", HVACAction.HEATING),
     ],
 )
 def test_hvac_action_from_output_reading(output, desired, expected):
     """Raumthermostat reports "output"; the action follows it and the mode."""
     climate, device_state = _make_climate(THERMOSTAT_HEX)
+    if desired == "hvac_off":
+        climate._hvac_off = True
+        desired = TEMP_MIN
     device_state.status.desired_temp = desired
     if output is not None:
         device_state.status.readings["output"] = output
@@ -516,6 +601,40 @@ async def test_climate_added_to_hass_ignores_invalid_temperature():
         await climate.async_added_to_hass()
     assert climate._restored_desired_temp is None
     assert climate._restored_measured_temp is None
+
+
+async def test_climate_added_to_hass_restores_off_and_setpoint_before_off():
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    climate, _ = _make_climate(HSA_HEX)
+    mock_state = MagicMock()
+    mock_state.state = "off"
+    mock_state.attributes = {"temperature": 4.0, "current_temperature": 19.0}
+    extra = MagicMock()
+    extra.as_dict.return_value = {"setpoint_before_off": "21.0"}
+    with patch.object(CoordinatorEntity, "async_added_to_hass", new_callable=AsyncMock):
+        climate.async_get_last_state = AsyncMock(return_value=mock_state)
+        climate.async_get_last_extra_data = AsyncMock(return_value=extra)
+        await climate.async_added_to_hass()
+    assert climate.hvac_mode == HVACMode.OFF
+    assert climate._setpoint_before_off == 21.0
+
+
+async def test_climate_added_to_hass_ignores_invalid_setpoint_before_off():
+    from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+    climate, _ = _make_climate(HSA_HEX)
+    mock_state = MagicMock()
+    mock_state.state = "heat"
+    mock_state.attributes = {}
+    extra = MagicMock()
+    extra.as_dict.return_value = {"setpoint_before_off": "bad"}
+    with patch.object(CoordinatorEntity, "async_added_to_hass", new_callable=AsyncMock):
+        climate.async_get_last_state = AsyncMock(return_value=mock_state)
+        climate.async_get_last_extra_data = AsyncMock(return_value=extra)
+        await climate.async_added_to_hass()
+    assert climate.hvac_mode == HVACMode.HEAT
+    assert climate._setpoint_before_off is None
 
 
 # ---------------------------------------------------------------------------

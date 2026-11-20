@@ -773,7 +773,7 @@ async def test_climate_entities_show_status_frames(
         assert actuator.attributes["target_temp_step"] == 0.5
 
         thermostat = _state(hass, "climate", "duofern_737AF9")
-        assert thermostat.state == "off"  # setpoint at the 4 degC minimum
+        assert thermostat.state == "heat"  # 4 degC is a setpoint, not "off"
         assert thermostat.attributes["temperature"] == 4.0
         assert thermostat.attributes["current_temperature"] == 20.0
         assert thermostat.attributes["max_temp"] == 40.0

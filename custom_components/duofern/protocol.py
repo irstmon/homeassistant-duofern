@@ -300,7 +300,7 @@ class ParsedStatus:
     desired_temp: float | None = None
 
     # Boost mode fields — only populated for 0xE1 Heizkörperantrieb (format 29).
-    # boost_active: True when frame subtype == 0xF0 (desired-temp = 28°C).
+    # boost_active: True when bit 6 of frame byte 12 is set (see parse_status).
     # boost_duration_min: originally set duration in minutes (byte[12] & 0x3F).
     #   Does NOT count down — always shows the value from the last Boost-ON command.
     #   Value 9 is the factory default (no boost ever set).
@@ -700,7 +700,7 @@ class DuoFernEncoder:
 
         From 30_DUOFERN.pm:
           $duoSetHSA = "0D011D80nnnnnn0000000000000000000000yyyyyy00"
-          nnnnnn = 24-bit setValue (little-endian in hex pairs)
+          nnnnnn = 24-bit setValue, big-endian (f[4] = bits 16-23)
           yyyyyy = device code
 
         Bit layout of setValue (commandsHSA):
@@ -740,7 +740,7 @@ class DuoFernEncoder:
         #     f[11] = 0x03
         #     Evidence: bug_boost_5 03:19:28 — f[8]=0x00, f[11]=0x03
         #
-        #   Boost ON ACK (device started boost via button, F0 already sent):
+        #   Boost ON ACK (device started boost via button, boost frame already sent):
         #     f[8] = 0x00  (no duration override)
         #     f[11] = 0x03
         #     Evidence: bug_boost_5 03:19:28 — same encoding as dur-unchanged
@@ -1285,13 +1285,22 @@ class DuoFernDecoder:
                 pass
 
         # Boost detection for 0xE1 Heizkörperantrieb (format 29).
-        # Boost active:   frame[4] (subtype) == 0xF0 → desired-temp = 28°C
-        # Boost duration: frame[12] & 0x3F minutes (upper 2 bits = rolling counter)
-        #   0x09 (9) is the factory default — no boost ever set.
-        #   After a boost the value stays at the set duration even after boost ends.
+        # Frame byte 12:
+        #   bit 7     forceResponse (statusId 187, position 8, bit 7)
+        #   bit 6     boost active
+        #   bits 0-5  boost duration in minutes
+        # Byte 4 is NOT a boost indicator: its bits 0-5 are desired-temp
+        # (statusId 180). During a boost the device reports desired-temp 28.0,
+        # which gives byte 4 = 0xF0, but a normal setpoint of 28.0 gives the
+        # same byte. Real frames (2026-11-19, one device): setpoint 28.0
+        # without boost -> byte 12 = 0x0E; boost started with the device
+        # button -> 0x4E / 0xCE in every boost frame; first frame after the
+        # boost ended -> 0x0E.
+        # Boost duration: does not count down, keeps the last set value after
+        # the boost ended. 0x09 (9) is the factory default (no boost ever set).
         # Confirmed by live frame captures: 4 min → 0x04, 30 min → 0x1E, 60 min → 0x3C.
         if fmt == "29":
-            result.boost_active = frame[4] == 0xF0
+            result.boost_active = bool(frame[12] & 0x40)
             result.boost_duration_min = frame[12] & 0x3F
             # Mirror into readings so the normal HSA queue/optimistic-update
             # mechanism works identically for boost as for manualMode etc.
